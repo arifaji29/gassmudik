@@ -12,7 +12,6 @@ import VehicleSettings, { VEHICLE_OPTIONS } from './VehicleSettings';
 import VideoSettings from './VideoSettings';
 import { getProcessedImageData, getCoordinates } from '../utils/mapUtils';
 
-// Fungsi Easing untuk membuat gerakan mulus (Akselerasi & Deselerasi)
 function easeInOutSine(x: number): number {
   return -(Math.cos(Math.PI * x) - 1) / 2;
 }
@@ -189,10 +188,26 @@ export default function MapComponent() {
                         map.setLayoutProperty('motor-layer', 'icon-image', newImageId);
                         map.setLayoutProperty('motor-layer', 'icon-size', modelSize);
                         map.setLayoutProperty('motor-layer', 'icon-rotate', rotationOffsetRef.current);
+                        // PERBAIKAN: gunakan setPaintProperty untuk translate
+                        map.setPaintProperty('motor-layer', 'icon-translate', [0, 0]); 
                         map.setLayoutProperty('motor-layer', 'visibility', 'visible');
                     } else {
                         map.addSource('motor', { type: 'geojson', data: point });
-                        map.addLayer({ id: 'motor-layer', type: 'symbol', source: 'motor', layout: { 'icon-image': newImageId, 'icon-size': modelSize, 'icon-allow-overlap': true, 'icon-rotation-alignment': 'map', 'icon-rotate': rotationOffsetRef.current } });
+                        map.addLayer({ 
+                            id: 'motor-layer', 
+                            type: 'symbol', 
+                            source: 'motor', 
+                            layout: { 
+                                'icon-image': newImageId, 
+                                'icon-size': modelSize, 
+                                'icon-allow-overlap': true, 
+                                'icon-rotation-alignment': 'map', 
+                                'icon-rotate': rotationOffsetRef.current 
+                            },
+                            paint: {
+                                'icon-translate': [0, 0] // PERBAIKAN: dipindah ke paint
+                            }
+                        });
                     }
                 } else {
                     if (map.getLayer('motor-layer')) map.setLayoutProperty('motor-layer', 'visibility', 'none');
@@ -207,12 +222,8 @@ export default function MapComponent() {
                     
                     const allCoordsArr = validPoints.map(p => p.coord);
                     let routeFeature: any; 
-                    if (allCoordsArr.length === 2) {
-                        routeFeature = turf.lineString((turf.greatCircle(allCoordsArr[0], allCoordsArr[1])).geometry.coordinates as [number, number][]);
-                    } else {
-                        // Memperpadat titik kurva agar pratinjau lebih presisi
-                        routeFeature = turf.bezierSpline(turf.lineString(allCoordsArr), { resolution: 2000, sharpness: 0.6 });
-                    }
+                    if (allCoordsArr.length === 2) routeFeature = turf.lineString((turf.greatCircle(allCoordsArr[0], allCoordsArr[1])).geometry.coordinates as [number, number][]);
+                    else routeFeature = turf.bezierSpline(turf.lineString(allCoordsArr), { resolution: 10000, sharpness: 0.6 });
 
                     if (map.getSource('route')) {
                         (map.getSource('route') as maplibregl.GeoJSONSource).setData(routeFeature);
@@ -328,6 +339,10 @@ export default function MapComponent() {
       if (mapRef.current.getSource('motor')) {
         (mapRef.current.getSource('motor') as maplibregl.GeoJSONSource).setData(turf.featureCollection([]));
       }
+      if (mapRef.current.getLayer('motor-layer')) {
+          // PERBAIKAN: reset translate menggunakan setPaintProperty
+          mapRef.current.setPaintProperty('motor-layer', 'icon-translate', [0, 0]);
+      }
       mapRef.current.flyTo({ center: [108.5, -6.8], zoom: 6, pitch: 0, bearing: 0, duration: 1500 });
     }
   };
@@ -388,7 +403,6 @@ export default function MapComponent() {
       if (allCoords.length === 2) {
           routeFeature = turf.lineString((turf.greatCircle(allCoords[0], allCoords[1])).geometry.coordinates as [number, number][]);
       } else {
-          // Membuat spline sangat padat agar animasi rute yang meliuk-liuk menjadi mulus tanpa jitter
           routeFeature = turf.bezierSpline(turf.lineString(allCoords), { resolution: 2000, sharpness: 0.6 });
       }
 
@@ -426,10 +440,7 @@ export default function MapComponent() {
       }
 
       const point = turf.point(routeFeature.geometry.coordinates[0] as [number, number]);
-      
-      // Look-ahead bearing yang lebih stabil
-      const lookAheadDist = Math.max(0.5, distanceInKm * 0.01);
-      const nextPointForBearing = turf.along(routeFeature, Math.min(lookAheadDist, distanceInKm), { units: 'kilometers' });
+      const nextPointForBearing = turf.along(routeFeature, Math.min(1, distanceInKm), { units: 'kilometers' });
       const initialBearing = turf.bearing(point, nextPointForBearing);
       currentBearingRef.current = initialBearing; 
 
@@ -438,6 +449,8 @@ export default function MapComponent() {
         map.setLayoutProperty('motor-layer', 'icon-image', newImageId); 
         map.setLayoutProperty('motor-layer', 'icon-size', modelSize);
         map.setLayoutProperty('motor-layer', 'icon-rotate', initialBearing + rotationOffsetRef.current);
+        // PERBAIKAN: gunakan setPaintProperty untuk icon-translate
+        map.setPaintProperty('motor-layer', 'icon-translate', [0, 0]);
         map.setLayoutProperty('motor-layer', 'visibility', 'visible');
       } else {
         map.addSource('motor', { type: 'geojson', data: point });
@@ -452,7 +465,10 @@ export default function MapComponent() {
                 'icon-rotation-alignment': 'map',
                 'icon-rotate': initialBearing + rotationOffsetRef.current,
                 'visibility': 'visible'
-            } 
+            },
+            paint: {
+                'icon-translate': [0, 0] // PERBAIKAN: ditaruh di dalam object paint
+            }
         });
       }
 
@@ -507,15 +523,12 @@ export default function MapComponent() {
         let rawProgress = elapsed / (videoDuration * 1000);
         const isAnimationDone = rawProgress >= 1;
         
-        // Terapkan Easing Function agar gerak kendaaan tidak kaku
-        const progress = easeInOutSine(Math.min(rawProgress, 1));
+        const progress = Math.min(rawProgress, 1);
         
         const currentDistance = progress * lineDistance;
-
         const currentPoint = turf.along(routeFeature, currentDistance, { units: 'kilometers' });
         
         if (!isAnimationDone) {
-            // Look-ahead stabil
             const lookAheadDist = Math.max(0.5, lineDistance * 0.01);
             let targetDistance = currentDistance + lookAheadDist; 
             if (targetDistance > lineDistance) targetDistance = lineDistance;
@@ -523,7 +536,17 @@ export default function MapComponent() {
             const nextPoint = turf.along(routeFeature, targetDistance, { units: 'kilometers' });
             const bearing = turf.bearing(currentPoint, nextPoint);
             currentBearingRef.current = bearing; 
-            map.setLayoutProperty('motor-layer', 'icon-rotate', bearing + rotationOffsetRef.current); 
+            
+            const bounceY = -Math.abs(Math.sin(elapsed / 120)) * 8; 
+            const wobble = Math.cos(elapsed / 120) * 3; 
+
+            // PERBAIKAN: Update posisi lompatan menggunakan setPaintProperty
+            map.setPaintProperty('motor-layer', 'icon-translate', [0, bounceY]);
+            map.setLayoutProperty('motor-layer', 'icon-rotate', bearing + rotationOffsetRef.current + wobble); 
+        } else {
+            // PERBAIKAN: Kembalikan translate menggunakan setPaintProperty
+            map.setPaintProperty('motor-layer', 'icon-translate', [0, 0]);
+            map.setLayoutProperty('motor-layer', 'icon-rotate', currentBearingRef.current + rotationOffsetRef.current);
         }
 
         (map.getSource('motor') as maplibregl.GeoJSONSource).setData(currentPoint);
@@ -533,7 +556,6 @@ export default function MapComponent() {
         if (distanceRef.current) distanceRef.current.innerText = `${currentDistance.toFixed(1)} KM`;
 
         if (shouldRecord && exportCtx && exportCanvas) {
-             // LOGIKA RENDER DIBEBASKAN (TANPA LIMIT 33ms) AGAR SUPER MULUS
              const mapCanvas = map.getCanvas();
              exportCtx.drawImage(mapCanvas, 0, 0); 
              

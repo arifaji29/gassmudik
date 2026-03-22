@@ -5,19 +5,24 @@ import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import * as turf from '@turf/turf';
 
-// Import Ikon Lucide React (Mengganti Route menjadi Bike)
-import { Bike, Image as ImageIcon, ZoomIn, ZoomOut, Scissors, Plus, X, Video, ArrowLeftRight, ArrowRight } from 'lucide-react';
+import { Bike, Image as ImageIcon, ZoomIn, ZoomOut, Scissors, Plus, X, Video, ArrowLeftRight, ArrowRight, RotateCcw } from 'lucide-react';
 
 import CityInput from './CityInput'; 
 import VehicleSettings, { VEHICLE_OPTIONS } from './VehicleSettings';
 import VideoSettings from './VideoSettings';
 import { getProcessedImageData, getCoordinates } from '../utils/mapUtils';
 
+// Fungsi Easing untuk membuat gerakan mulus (Akselerasi & Deselerasi)
+function easeInOutSine(x: number): number {
+  return -(Math.cos(Math.PI * x) - 1) / 2;
+}
+
 export default function MapComponent() {
   const mapContainer = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const animationRef = useRef<number | null>(null);
   const markersRef = useRef<maplibregl.Marker[]>([]);
+  const coordsCache = useRef<Record<string, [number, number]>>({}); 
   
   const distanceRef = useRef<HTMLDivElement>(null);
   const vehicleLabelMarkerRef = useRef<maplibregl.Marker | null>(null); 
@@ -26,29 +31,26 @@ export default function MapComponent() {
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const recordedChunksRef = useRef<Blob[]>([]);
 
-  // State Form Map
   const [asal, setAsal] = useState('Jakarta');
   const [tujuan, setTujuan] = useState('Surabaya');
   const [titikSinggah, setTitikSinggah] = useState<string[]>([]); 
   
-  // State Kendaraan
-  const [vehicleCategory, setVehicleCategory] = useState('motor'); 
-  const [vehicleType, setVehicleType] = useState('/vario.png'); 
+  const [vehicleCategory, setVehicleCategory] = useState('mobil'); 
+  const [vehicleType, setVehicleType] = useState('/car.png'); 
   const [customImage, setCustomImage] = useState<string | null>(null);
-  const [modelSize, setModelSize] = useState(0.15); 
-  const [rotationUI, setRotationUI] = useState(-90);
+  const [modelSize, setModelSize] = useState(0.12); 
+  const [rotationUI, setRotationUI] = useState(90);
   const [isFlipped, setIsFlipped] = useState(false); 
   const [customLabel, setCustomLabel] = useState('');
   
-  // STATE PENGATURAN VIDEO
-  const [videoDuration, setVideoDuration] = useState(8); 
+  const [videoDuration, setVideoDuration] = useState(15); 
   const [videoResolution, setVideoResolution] = useState('full');
   const [watermark, setWatermark] = useState('');
 
   const customLabelRef = useRef(''); 
-  const rotationOffsetRef = useRef(-90); 
-  const currentBearingRef = useRef(0); // 👈 Menyimpan bearing terakhir untuk rotasi real-time
-  const estimasiWaktuRef = useRef<string | null>(null); // 👈 Menyimpan waktu agar bisa disablon ke video
+  const rotationOffsetRef = useRef(90); 
+  const currentBearingRef = useRef(0); 
+  const estimasiWaktuRef = useRef<string | null>(null); 
   
   const [isFormExpanded, setIsFormExpanded] = useState(true);
   const [tempFile, setTempFile] = useState<File | null>(null); 
@@ -67,7 +69,6 @@ export default function MapComponent() {
   const [isFinished, setIsFinished] = useState(false); 
   const [estimasiWaktu, setEstimasiWaktu] = useState<string | null>(null);
 
-  // --- INIT MAP ---
   useEffect(() => {
     if (!mapContainer.current || mapRef.current) return; 
     const map = new maplibregl.Map({
@@ -86,13 +87,30 @@ export default function MapComponent() {
   }, [videoResolution]);
 
   useEffect(() => {
-    if (!mapRef.current || !mapRef.current.hasImage('vehicle-icon')) return;
+    if (!mapRef.current) return;
     const updateIcon = async () => {
-      const activeImageUrl = (vehicleCategory === 'custom' && customImage) ? customImage : vehicleType;
-      if (!activeImageUrl) return;
+      const activeImageUrl = vehicleCategory === 'custom' ? customImage : vehicleType;
+      
+      if (!activeImageUrl) {
+        if (mapRef.current?.getLayer('motor-layer')) {
+            mapRef.current.setLayoutProperty('motor-layer', 'visibility', 'none');
+        }
+        if (vehicleLabelMarkerRef.current) {
+            vehicleLabelMarkerRef.current.getElement().style.display = 'none';
+        }
+        return;
+      }
+
       try {
         const imageData = await getProcessedImageData(activeImageUrl, isFlipped);
-        if (mapRef.current?.hasImage('vehicle-icon')) mapRef.current.updateImage('vehicle-icon', imageData);
+        const newImageId = `vehicle-${Math.random().toString(36).substring(2, 9)}`; 
+        
+        mapRef.current?.addImage(newImageId, imageData);
+        
+        if (mapRef.current?.getLayer('motor-layer')) {
+            mapRef.current.setLayoutProperty('motor-layer', 'icon-image', newImageId);
+            mapRef.current.setLayoutProperty('motor-layer', 'visibility', 'visible');
+        }
       } catch (e) {}
     };
     updateIcon();
@@ -101,12 +119,131 @@ export default function MapComponent() {
   useEffect(() => {
     const el = vehicleLabelMarkerRef.current?.getElement();
     if (el) {
-      if (customLabel.trim() === '') el.style.display = 'none';
-      else { el.style.display = 'block'; el.innerText = customLabel; }
+      if (customLabel.trim() === '' || (vehicleCategory === 'custom' && !customImage)) {
+          el.style.display = 'none';
+      } else { 
+          el.style.display = 'block'; 
+          el.innerText = customLabel; 
+      }
     }
-  }, [customLabel]);
+  }, [customLabel, vehicleCategory, customImage]);
 
-  // --- HANDLER UI KENDARAAN (Ditambahkan Update Realtime ke Map Layer) ---
+  // --- LIVE PREVIEW MAP ---
+  useEffect(() => {
+    if (isPlaying || isRecording || isFinished) return;
+    if (!mapRef.current) return;
+
+    const timer = setTimeout(async () => {
+        try {
+            const map = mapRef.current!;
+            const validPoints: { name: string, coord: [number, number], type: 'start' | 'waypoint' | 'end' }[] = [];
+
+            const getCoordSafe = async (cityName: string): Promise<[number, number]> => {
+                if (coordsCache.current[cityName]) return coordsCache.current[cityName];
+                const c = await getCoordinates(cityName);
+                coordsCache.current[cityName] = c;
+                await new Promise(r => setTimeout(r, 400)); 
+                return c;
+            };
+
+            if (asal.trim()) { try { const c = await getCoordSafe(asal); validPoints.push({ name: asal, coord: c, type: 'start' }); } catch(e){} }
+            for (const wp of titikSinggah) {
+                if (wp.trim()) { try { const c = await getCoordSafe(wp); validPoints.push({ name: wp, coord: c, type: 'waypoint' }); } catch(e){} }
+            }
+            if (tujuan.trim()) { try { const c = await getCoordSafe(tujuan); validPoints.push({ name: tujuan, coord: c, type: 'end' }); } catch(e){} }
+
+            markersRef.current.forEach(m => m.remove());
+            markersRef.current = [];
+
+            validPoints.forEach((pt, index) => {
+                let color = pt.type === 'start' ? '#3b82f6' : pt.type === 'end' ? '#22c55e' : '#f97316'; 
+                const el = document.createElement('div'); el.style.cssText = 'display:flex; align-items:center; gap:6px; transition: all 0.3s ease;';
+                const dot = document.createElement('div'); dot.style.cssText = `width:12px; height:12px; background-color:${color}; border-radius:50%; border:2px solid white; box-shadow:0 2px 4px rgba(0,0,0,0.3);`;
+                const label = document.createElement('div'); label.textContent = pt.name; label.style.cssText = `background:white; padding:2px 6px; border-radius:4px; font-size:11px; font-weight:bold; color:#1f2937; border:1px solid ${color};`;
+                el.appendChild(dot); el.appendChild(label);
+                markersRef.current.push(new maplibregl.Marker({ element: el, anchor: 'left' }).setLngLat(pt.coord).addTo(map));
+            });
+
+            if (validPoints.length > 0 && validPoints[0].type === 'start') {
+                const startCoord = validPoints[0].coord;
+
+                if (vehicleLabelMarkerRef.current) vehicleLabelMarkerRef.current.remove();
+                const bubbleEl = document.createElement('div'); bubbleEl.className = 'custom-chat-bubble'; bubbleEl.innerText = customLabelRef.current; 
+                
+                const activeImageUrl = vehicleCategory === 'custom' ? customImage : vehicleType;
+                bubbleEl.style.display = (customLabelRef.current.trim() === '' || !activeImageUrl) ? 'none' : 'block';
+                
+                vehicleLabelMarkerRef.current = new maplibregl.Marker({ element: bubbleEl, anchor: 'bottom', offset: [0, -35] }).setLngLat(startCoord).addTo(map);
+
+                if (activeImageUrl) {
+                    const newImageId = `vehicle-${Math.random().toString(36).substring(2, 9)}`; 
+                    const point = turf.point(startCoord);
+                    
+                    try {
+                      const imageData = await getProcessedImageData(activeImageUrl, isFlipped);
+                      map.addImage(newImageId, imageData);
+                    } catch(e){}
+
+                    if (map.getSource('motor')) {
+                        (map.getSource('motor') as maplibregl.GeoJSONSource).setData(point);
+                        map.setLayoutProperty('motor-layer', 'icon-image', newImageId);
+                        map.setLayoutProperty('motor-layer', 'icon-size', modelSize);
+                        map.setLayoutProperty('motor-layer', 'icon-rotate', rotationOffsetRef.current);
+                        map.setLayoutProperty('motor-layer', 'visibility', 'visible');
+                    } else {
+                        map.addSource('motor', { type: 'geojson', data: point });
+                        map.addLayer({ id: 'motor-layer', type: 'symbol', source: 'motor', layout: { 'icon-image': newImageId, 'icon-size': modelSize, 'icon-allow-overlap': true, 'icon-rotation-alignment': 'map', 'icon-rotate': rotationOffsetRef.current } });
+                    }
+                } else {
+                    if (map.getLayer('motor-layer')) map.setLayoutProperty('motor-layer', 'visibility', 'none');
+                }
+
+                if (validPoints.length === 1) {
+                    map.flyTo({ center: startCoord, zoom: 8, duration: 1200 });
+                    if (map.getSource('route')) (map.getSource('route') as maplibregl.GeoJSONSource).setData(turf.featureCollection([]));
+                } else if (validPoints.length > 1) {
+                    const bounds = new maplibregl.LngLatBounds(validPoints[0].coord, validPoints[0].coord);
+                    validPoints.forEach(p => bounds.extend(p.coord));
+                    
+                    const allCoordsArr = validPoints.map(p => p.coord);
+                    let routeFeature: any; 
+                    if (allCoordsArr.length === 2) {
+                        routeFeature = turf.lineString((turf.greatCircle(allCoordsArr[0], allCoordsArr[1])).geometry.coordinates as [number, number][]);
+                    } else {
+                        // Memperpadat titik kurva agar pratinjau lebih presisi
+                        routeFeature = turf.bezierSpline(turf.lineString(allCoordsArr), { resolution: 2000, sharpness: 0.6 });
+                    }
+
+                    if (map.getSource('route')) {
+                        (map.getSource('route') as maplibregl.GeoJSONSource).setData(routeFeature);
+                        map.setPaintProperty('route-line', 'line-opacity', 0.4); 
+                    } else {
+                        map.addSource('route', { type: 'geojson', data: routeFeature });
+                        map.addLayer({ id: 'route-line', type: 'line', source: 'route', layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': '#ef4444', 'line-width': 5, 'line-opacity': 0.4 } });
+                    }
+
+                    const distanceInKmPreview = turf.length(routeFeature, { units: 'kilometers' });
+                    const nextPointForBearing = turf.along(routeFeature, Math.min(1, distanceInKmPreview), { units: 'kilometers' });
+                    const initialBearing = turf.bearing(turf.point(startCoord), nextPointForBearing);
+                    currentBearingRef.current = initialBearing;
+                    
+                    if (map.getLayer('motor-layer')) {
+                        map.setLayoutProperty('motor-layer', 'icon-rotate', initialBearing + rotationOffsetRef.current);
+                        map.moveLayer('motor-layer'); 
+                    }
+                    map.fitBounds(bounds, { padding: 80, duration: 1200 });
+                }
+            } else {
+                if (map.getSource('motor')) (map.getSource('motor') as maplibregl.GeoJSONSource).setData(turf.featureCollection([]));
+                if (map.getSource('route')) (map.getSource('route') as maplibregl.GeoJSONSource).setData(turf.featureCollection([]));
+            }
+
+        } catch (err) { console.error("Live preview error:", err); }
+    }, 1200);
+
+    return () => clearTimeout(timer);
+  }, [asal, tujuan, titikSinggah, vehicleType, customImage, customLabel, modelSize, rotationUI, isFlipped, vehicleCategory, isPlaying, isRecording, isFinished]);
+
   const handleCategoryChange = (category: string) => {
     setVehicleCategory(category);
     setIsFlipped(false);
@@ -149,18 +286,56 @@ export default function MapComponent() {
   const handleRotationChange = (val: number) => { 
       setRotationUI(val); 
       rotationOffsetRef.current = val; 
-      // Update Realtime saat start/finish
       if (mapRef.current?.getLayer('motor-layer')) {
           mapRef.current.setLayoutProperty('motor-layer', 'icon-rotate', currentBearingRef.current + val);
       }
   };
 
+  const handleReset = () => {
+    setAsal('');
+    setTujuan('');
+    setTitikSinggah([]);
+    setCustomLabel('');
+    customLabelRef.current = '';
+    setWatermark('');
+    
+    setVehicleCategory('mobil');
+    setVehicleType('/car.png');
+    setCustomImage(null);
+    setModelSize(0.12);
+    setRotationUI(90);
+    rotationOffsetRef.current = 90;
+    setIsFlipped(false);
+    setIsEditorFlipped(false);
+    
+    setIsFinished(false);
+    setIsPlaying(false);
+    setIsRecording(false);
+    setEstimasiWaktu(null);
+    estimasiWaktuRef.current = null;
+    
+    if (distanceRef.current) distanceRef.current.innerText = "0.0 KM";
+    if (animationRef.current) cancelAnimationFrame(animationRef.current);
+    
+    markersRef.current.forEach(m => m.remove());
+    markersRef.current = [];
+    if (vehicleLabelMarkerRef.current) vehicleLabelMarkerRef.current.remove();
+    
+    if (mapRef.current) {
+      if (mapRef.current.getSource('route')) {
+        (mapRef.current.getSource('route') as maplibregl.GeoJSONSource).setData(turf.featureCollection([]));
+      }
+      if (mapRef.current.getSource('motor')) {
+        (mapRef.current.getSource('motor') as maplibregl.GeoJSONSource).setData(turf.featureCollection([]));
+      }
+      mapRef.current.flyTo({ center: [108.5, -6.8], zoom: 6, pitch: 0, bearing: 0, duration: 1500 });
+    }
+  };
+
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => { const file = e.target.files?.[0]; if (file) { setTempFile(file); setBgWarningOpen(true); } e.target.value = ''; };
-  
   const handleMouseDown = (e: React.MouseEvent | React.TouchEvent) => { setIsDragging(true); const clientX = 'touches' in e ? e.touches[0].clientX : (e as React.MouseEvent).clientX; const clientY = 'touches' in e ? e.touches[0].clientY : (e as React.MouseEvent).clientY; setDragStart({ x: clientX - pan.x, y: clientY - pan.y }); };
   const handleMouseMove = (e: React.MouseEvent | React.TouchEvent) => { if (!isDragging) return; const clientX = 'touches' in e ? e.touches[0].clientX : (e as React.MouseEvent).clientX; const clientY = 'touches' in e ? e.touches[0].clientY : (e as React.MouseEvent).clientY; setPan({ x: clientX - dragStart.x, y: clientY - dragStart.y }); };
   const handleMouseUp = () => setIsDragging(false);
-
   const proceedToCrop = () => { if (tempFile) { const reader = new FileReader(); reader.onload = (event) => { setRawImage(event.target?.result as string); setPan({ x: 0, y: 0 }); setZoom(1); setIsEditorFlipped(false); setBgWarningOpen(false); setEditorOpen(true); }; reader.readAsDataURL(tempFile); } };
   const goToRemoveBg = () => { window.open('https://www.remove.bg', '_blank'); setBgWarningOpen(false); setTempFile(null); };
 
@@ -183,8 +358,15 @@ export default function MapComponent() {
     img.src = rawImage;
   };
 
-  // --- CORE ENGINE: MUDIK ANIMATION & RECORDING ---
   async function handleGassMudik(shouldRecord: boolean = false) {
+    if (!asal || !tujuan) return alert("Mohon isi Kota Asal dan Tujuan terlebih dahulu.");
+    
+    const activeImageUrl = vehicleCategory === 'custom' ? customImage : vehicleType;
+    if (!activeImageUrl) {
+        setIsLoading(false);
+        return alert("Mohon unggah gambar Custom Anda terlebih dahulu, atau pilih kategori kendaraan lain!");
+    }
+
     if (!mapRef.current) return;
     const map = mapRef.current;
     
@@ -203,14 +385,18 @@ export default function MapComponent() {
       const allNames = [asal, ...validWaypoints, tujuan];
 
       let routeFeature: any; 
-      if (allCoords.length === 2) routeFeature = turf.lineString((turf.greatCircle(allCoords[0], allCoords[1])).geometry.coordinates as [number, number][]);
-      else routeFeature = turf.bezierSpline(turf.lineString(allCoords), { resolution: 10000, sharpness: 0.6 });
+      if (allCoords.length === 2) {
+          routeFeature = turf.lineString((turf.greatCircle(allCoords[0], allCoords[1])).geometry.coordinates as [number, number][]);
+      } else {
+          // Membuat spline sangat padat agar animasi rute yang meliuk-liuk menjadi mulus tanpa jitter
+          routeFeature = turf.bezierSpline(turf.lineString(allCoords), { resolution: 2000, sharpness: 0.6 });
+      }
 
       const distanceInKm = turf.length(routeFeature, { units: 'kilometers' });
       const jam = Math.floor(distanceInKm / 60); const menit = Math.floor(((distanceInKm / 60) - jam) * 60);
       const estimasiStr = jam > 0 ? `${jam} Jam ${menit} Menit` : `${menit} Menit`;
       setEstimasiWaktu(estimasiStr);
-      estimasiWaktuRef.current = estimasiStr; // 👈 Simpan ke ref untuk sablon video
+      estimasiWaktuRef.current = estimasiStr; 
 
       markersRef.current.forEach(m => m.remove()); markersRef.current = [];
       allCoords.forEach((coord, index) => {
@@ -226,28 +412,54 @@ export default function MapComponent() {
       const bubbleEl = document.createElement('div'); bubbleEl.className = 'custom-chat-bubble'; bubbleEl.innerText = customLabelRef.current; bubbleEl.style.display = customLabelRef.current.trim() === '' ? 'none' : 'block';
       vehicleLabelMarkerRef.current = new maplibregl.Marker({ element: bubbleEl, anchor: 'bottom', offset: [0, -35] }).setLngLat(startCoord).addTo(map);
 
-      const activeImageUrl = (vehicleCategory === 'custom' && customImage) ? customImage : vehicleType;
       const imageData = await getProcessedImageData(activeImageUrl, isFlipped);
-      const imageId = 'vehicle-icon'; 
+      const newImageId = `vehicle-${Math.random().toString(36).substring(2, 9)}`; 
 
-      if (map.hasImage(imageId)) map.updateImage(imageId, imageData); else map.addImage(imageId, imageData);
+      map.addImage(newImageId, imageData); 
 
-      if (map.getSource('route')) (map.getSource('route') as maplibregl.GeoJSONSource).setData(routeFeature);
-      else {
-        map.addSource('route', { type: 'geojson', data: routeFeature });
-        map.addLayer({ id: 'route-line', type: 'line', source: 'route', layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': '#ef4444', 'line-width': 5, 'line-opacity': 0.8 } });
+      if (map.getSource('route')) {
+          (map.getSource('route') as maplibregl.GeoJSONSource).setData(routeFeature);
+          map.setPaintProperty('route-line', 'line-opacity', 0.8); 
+      } else {
+          map.addSource('route', { type: 'geojson', data: routeFeature });
+          map.addLayer({ id: 'route-line', type: 'line', source: 'route', layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': '#ef4444', 'line-width': 5, 'line-opacity': 0.8 } });
       }
 
       const point = turf.point(routeFeature.geometry.coordinates[0] as [number, number]);
+      
+      // Look-ahead bearing yang lebih stabil
+      const lookAheadDist = Math.max(0.5, distanceInKm * 0.01);
+      const nextPointForBearing = turf.along(routeFeature, Math.min(lookAheadDist, distanceInKm), { units: 'kilometers' });
+      const initialBearing = turf.bearing(point, nextPointForBearing);
+      currentBearingRef.current = initialBearing; 
+
       if (map.getSource('motor')) {
         (map.getSource('motor') as maplibregl.GeoJSONSource).setData(point);
-        map.setLayoutProperty('motor-layer', 'icon-image', imageId); map.setLayoutProperty('motor-layer', 'icon-size', modelSize);
+        map.setLayoutProperty('motor-layer', 'icon-image', newImageId); 
+        map.setLayoutProperty('motor-layer', 'icon-size', modelSize);
+        map.setLayoutProperty('motor-layer', 'icon-rotate', initialBearing + rotationOffsetRef.current);
+        map.setLayoutProperty('motor-layer', 'visibility', 'visible');
       } else {
         map.addSource('motor', { type: 'geojson', data: point });
-        map.addLayer({ id: 'motor-layer', type: 'symbol', source: 'motor', layout: { 'icon-image': imageId, 'icon-size': modelSize, 'icon-allow-overlap': true, 'icon-rotation-alignment': 'map' } });
+        map.addLayer({ 
+            id: 'motor-layer', 
+            type: 'symbol', 
+            source: 'motor', 
+            layout: { 
+                'icon-image': newImageId, 
+                'icon-size': modelSize, 
+                'icon-allow-overlap': true, 
+                'icon-rotation-alignment': 'map',
+                'icon-rotate': initialBearing + rotationOffsetRef.current,
+                'visibility': 'visible'
+            } 
+        });
       }
 
-      // --- LOGIKA COMPOSITING & PEREKAMAN MP4 / WEBM ---
+      if (map.getLayer('motor-layer')) {
+          map.moveLayer('motor-layer');
+      }
+
       let exportCtx: CanvasRenderingContext2D | null = null;
       let exportCanvas: HTMLCanvasElement | null = null;
       const dpr = window.devicePixelRatio || 1;
@@ -259,7 +471,7 @@ export default function MapComponent() {
           exportCanvas.width = mapCanvas.width; exportCanvas.height = mapCanvas.height;
           exportCtx = exportCanvas.getContext('2d');
 
-          const stream = exportCanvas.captureStream(30);
+          const stream = exportCanvas.captureStream(30); 
           recordedChunksRef.current = [];
           
           let mimeType = 'video/webm; codecs=vp9'; let extension = 'webm';
@@ -279,121 +491,129 @@ export default function MapComponent() {
         } catch (err) { console.error(err); alert("Browser ini tidak mendukung fitur rekam video otomatis."); setIsRecording(false); shouldRecord = false; }
       }
 
-      setIsLoading(false); setIsPlaying(true); setIsFormExpanded(false); 
+      setIsLoading(false); setIsPlaying(true); 
+      if (shouldRecord) { setIsFormExpanded(false); }
 
-      // Menerbangkan Kamera Dulu (2 Detik)
       map.flyTo({ center: startCoord, zoom: 8, pitch: 50, duration: 2000 });
       
       let startTime: number | null = null;
       const lineDistance = turf.length(routeFeature);
       let hasTriggeredFinishUI = false;
 
-      // --- ANIMASI TIME-BASED (Akurat berapapun FPS-nya) ---
       function animate(timestamp: number) {
         if (!startTime) startTime = timestamp;
         const elapsed = timestamp - startTime;
         
-        // Progress dibatasi di 1 agar berhenti di ujung garis
-        let progress = elapsed / (videoDuration * 1000);
-        const isAnimationDone = progress >= 1;
-        progress = Math.min(progress, 1);
+        let rawProgress = elapsed / (videoDuration * 1000);
+        const isAnimationDone = rawProgress >= 1;
+        
+        // Terapkan Easing Function agar gerak kendaaan tidak kaku
+        const progress = easeInOutSine(Math.min(rawProgress, 1));
         
         const currentDistance = progress * lineDistance;
 
         const currentPoint = turf.along(routeFeature, currentDistance, { units: 'kilometers' });
-        let targetDistance = currentDistance + 2; if (targetDistance > lineDistance) targetDistance = lineDistance;
-        const nextPoint = turf.along(routeFeature, targetDistance, { units: 'kilometers' });
-        const bearing = turf.bearing(currentPoint, nextPoint);
         
-        currentBearingRef.current = bearing; // 👈 Simpan agar UI Rotasi tetap bisa update realtime ketika finish
+        if (!isAnimationDone) {
+            // Look-ahead stabil
+            const lookAheadDist = Math.max(0.5, lineDistance * 0.01);
+            let targetDistance = currentDistance + lookAheadDist; 
+            if (targetDistance > lineDistance) targetDistance = lineDistance;
+            
+            const nextPoint = turf.along(routeFeature, targetDistance, { units: 'kilometers' });
+            const bearing = turf.bearing(currentPoint, nextPoint);
+            currentBearingRef.current = bearing; 
+            map.setLayoutProperty('motor-layer', 'icon-rotate', bearing + rotationOffsetRef.current); 
+        }
 
         (map.getSource('motor') as maplibregl.GeoJSONSource).setData(currentPoint);
-        map.setLayoutProperty('motor-layer', 'icon-rotate', bearing + rotationOffsetRef.current); 
-        map.panTo(currentPoint.geometry.coordinates as [number, number], { duration: 0 });
+        map.jumpTo({ center: currentPoint.geometry.coordinates as [number, number] });
 
         if (vehicleLabelMarkerRef.current) vehicleLabelMarkerRef.current.setLngLat(currentPoint.geometry.coordinates as [number, number]);
         if (distanceRef.current) distanceRef.current.innerText = `${currentDistance.toFixed(1)} KM`;
 
-        // --- SABLON LAYER KE CANVAS REKAMAN (Real-time Overlay Compositing) ---
         if (shouldRecord && exportCtx && exportCanvas) {
-          const mapCanvas = map.getCanvas();
-          exportCtx.drawImage(mapCanvas, 0, 0); 
-          
-          // Sablon Rute & Label Kota
-          allCoords.forEach((coord, i) => {
-             const pos = map.project(coord as [number, number]);
-             const x = pos.x * dpr; const y = pos.y * dpr;
-             const color = i === 0 ? '#3b82f6' : i === allCoords.length - 1 ? '#22c55e' : '#f97316';
+             // LOGIKA RENDER DIBEBASKAN (TANPA LIMIT 33ms) AGAR SUPER MULUS
+             const mapCanvas = map.getCanvas();
+             exportCtx.drawImage(mapCanvas, 0, 0); 
              
-             exportCtx!.beginPath(); exportCtx!.arc(x, y, 6 * dpr, 0, 2 * Math.PI);
-             exportCtx!.fillStyle = color; exportCtx!.fill();
-             exportCtx!.lineWidth = 2 * dpr; exportCtx!.strokeStyle = 'white'; exportCtx!.stroke();
+             allCoords.forEach((coord, i) => {
+                const pos = map.project(coord as [number, number]);
+                const x = pos.x * dpr; const y = pos.y * dpr;
+                const color = i === 0 ? '#3b82f6' : i === allCoords.length - 1 ? '#22c55e' : '#f97316';
+                
+                exportCtx!.beginPath(); exportCtx!.arc(x, y, 6 * dpr, 0, 2 * Math.PI);
+                exportCtx!.fillStyle = color; exportCtx!.fill();
+                exportCtx!.lineWidth = 2 * dpr; exportCtx!.strokeStyle = 'white'; exportCtx!.stroke();
 
-             const text = allNames[i];
-             exportCtx!.font = `bold ${11 * dpr}px sans-serif`;
-             const tw = exportCtx!.measureText(text).width;
-             exportCtx!.fillStyle = 'white'; exportCtx!.fillRect(x + 12 * dpr, y - 10 * dpr, tw + 8 * dpr, 20 * dpr);
-             exportCtx!.fillStyle = '#1f2937'; exportCtx!.fillText(text, x + 16 * dpr, y + 4 * dpr);
-          });
+                const text = allNames[i];
+                exportCtx!.font = `bold ${11 * dpr}px sans-serif`;
+                const tw = exportCtx!.measureText(text).width;
+                exportCtx!.fillStyle = 'white'; exportCtx!.fillRect(x + 12 * dpr, y - 10 * dpr, tw + 8 * dpr, 20 * dpr);
+                exportCtx!.fillStyle = '#1f2937'; exportCtx!.fillText(text, x + 16 * dpr, y + 4 * dpr);
+             });
 
-          // Sablon Bubble Chat Kendaraan
-          if (customLabelRef.current.trim() !== '') {
-             const vehPos = map.project(currentPoint.geometry.coordinates as [number, number]);
-             const vx = vehPos.x * dpr; const vy = (vehPos.y - 35) * dpr;
-             const text = customLabelRef.current;
-             exportCtx.font = `900 ${12 * dpr}px sans-serif`;
-             const tw = exportCtx.measureText(text).width;
+             if (customLabelRef.current.trim() !== '') {
+                const vehPos = map.project(currentPoint.geometry.coordinates as [number, number]);
+                const vx = vehPos.x * dpr; const vy = (vehPos.y - 35) * dpr;
+                const text = customLabelRef.current;
+                exportCtx.font = `900 ${12 * dpr}px sans-serif`;
+                const tw = exportCtx.measureText(text).width;
+                
+                exportCtx.fillStyle = 'white'; exportCtx.fillRect(vx - tw/2 - 10*dpr, vy - 14*dpr, tw + 20*dpr, 20*dpr);
+                exportCtx.lineWidth = 1.5 * dpr; exportCtx.strokeStyle = '#e5e7eb'; exportCtx.strokeRect(vx - tw/2 - 10*dpr, vy - 14*dpr, tw + 20*dpr, 20*dpr);
+                exportCtx.fillStyle = '#1f2937'; exportCtx.textAlign = 'center'; exportCtx.fillText(text, vx, vy + 4*dpr); exportCtx.textAlign = 'left';
+             }
+
+             const distText = `${currentDistance.toFixed(1)} KM`;
+             exportCtx.font = `900 ${16 * dpr}px sans-serif`; 
+             const distW = exportCtx.measureText(distText).width;
              
-             exportCtx.fillStyle = 'white'; exportCtx.fillRect(vx - tw/2 - 10*dpr, vy - 14*dpr, tw + 20*dpr, 20*dpr);
-             exportCtx.lineWidth = 1.5 * dpr; exportCtx.strokeStyle = '#e5e7eb'; exportCtx.strokeRect(vx - tw/2 - 10*dpr, vy - 14*dpr, tw + 20*dpr, 20*dpr);
-             exportCtx.fillStyle = '#1f2937'; exportCtx.textAlign = 'center'; exportCtx.fillText(text, vx, vy + 4*dpr); exportCtx.textAlign = 'left';
-          }
+             let boxWidth = distW + 30 * dpr;
+             let boxHeight = 30 * dpr; 
 
-          // Sablon Indikator Jarak Real-time (dan Waktu di Akhir)
-          const distText = `${currentDistance.toFixed(1)} KM`;
-          exportCtx.font = `900 ${24 * dpr}px sans-serif`;
-          const distW = exportCtx.measureText(distText).width;
-          
-          let boxWidth = distW + 40 * dpr;
-          let boxHeight = 50 * dpr;
+             if (progress >= 1 && estimasiWaktuRef.current) {
+                 exportCtx.font = `bold ${12 * dpr}px sans-serif`;
+                 const timeText = `Waktu: ${estimasiWaktuRef.current}`;
+                 const timeW = exportCtx.measureText(timeText).width;
+                 boxWidth = Math.max(boxWidth, timeW + 30 * dpr);
+                 boxHeight = 50 * dpr; 
+             }
 
-          // 👈 Tampilkan Estimasi Waktu ke dalam Video Sablon jika sudah Finish (Progress 100%)
-          if (progress >= 1 && estimasiWaktuRef.current) {
-              exportCtx.font = `bold ${14 * dpr}px sans-serif`;
-              const timeText = `Waktu: ${estimasiWaktuRef.current}`;
-              const timeW = exportCtx.measureText(timeText).width;
-              boxWidth = Math.max(boxWidth, timeW + 40 * dpr);
-              boxHeight = 85 * dpr;
-          }
+             const startX = 20 * dpr;
+             const startY = 20 * dpr;
 
-          exportCtx.fillStyle = 'rgba(255,255,255,0.9)';
-          exportCtx.fillRect(exportCanvas.width - boxWidth - 10*dpr, exportCanvas.height - boxHeight - 10*dpr, boxWidth, boxHeight);
-          exportCtx.fillStyle = '#1f2937';
-          exportCtx.textAlign = 'right';
-          exportCtx.fillText(distText, exportCanvas.width - 25*dpr, exportCanvas.height - boxHeight + 35*dpr);
-          
-          if (progress >= 1 && estimasiWaktuRef.current) {
-              exportCtx.font = `bold ${14 * dpr}px sans-serif`;
-              exportCtx.fillStyle = '#16a34a'; 
-              exportCtx.fillText(`Waktu: ${estimasiWaktuRef.current}`, exportCanvas.width - 25*dpr, exportCanvas.height - 25*dpr);
-          }
-          exportCtx.textAlign = 'left'; // reset format
+             exportCtx.fillStyle = 'rgba(255,255,255,0.9)';
+             if (typeof (exportCtx as any).roundRect === 'function') {
+                 exportCtx.beginPath();
+                 (exportCtx as any).roundRect(startX, startY, boxWidth, boxHeight, 8 * dpr);
+                 exportCtx.fill();
+             } else {
+                 exportCtx.fillRect(startX, startY, boxWidth, boxHeight);
+             }
+             
+             exportCtx.fillStyle = '#1f2937';
+             exportCtx.textAlign = 'left';
+             exportCtx.font = `900 ${16 * dpr}px sans-serif`;
+             exportCtx.fillText(distText, startX + 15 * dpr, startY + 22 * dpr);
+             
+             if (progress >= 1 && estimasiWaktuRef.current) {
+                 exportCtx.font = `bold ${12 * dpr}px sans-serif`;
+                 exportCtx.fillStyle = '#16a34a'; 
+                 exportCtx.fillText(`Waktu: ${estimasiWaktuRef.current}`, startX + 15 * dpr, startY + 40 * dpr);
+             }
 
-          // Sablon Watermark
-          if (watermark) {
-             exportCtx.font = `bold ${32 * dpr}px sans-serif`; exportCtx.fillStyle = "rgba(255, 255, 255, 0.8)";
-             exportCtx.shadowColor = "rgba(0, 0, 0, 0.5)"; exportCtx.shadowBlur = 4 * dpr;
-             exportCtx.fillText(watermark, 30 * dpr, exportCanvas.height - 40 * dpr);
-             exportCtx.shadowBlur = 0; 
-          }
+             if (watermark) {
+                exportCtx.font = `bold ${28 * dpr}px sans-serif`; exportCtx.fillStyle = "rgba(255, 255, 255, 0.8)";
+                exportCtx.shadowColor = "rgba(0, 0, 0, 0.5)"; exportCtx.shadowBlur = 4 * dpr;
+                exportCtx.fillText(watermark, 30 * dpr, exportCanvas.height - 40 * dpr);
+                exportCtx.shadowBlur = 0; 
+             }
         }
-        // ------------------------------------------------------------------
 
-        // Total durasi (tambah 3 detik jika sedang merekam)
         const totalDurationMs = shouldRecord ? (videoDuration * 1000) + 3000 : (videoDuration * 1000);
 
         if (elapsed < totalDurationMs) {
-          // Jika animasi sampai di tujuan, trigger UI "Finish" untuk memunculkan teks Waktu, tapi JANGAN stop video!
           if (isAnimationDone && !hasTriggeredFinishUI) {
               setIsPlaying(false);
               setIsFinished(true);
@@ -402,7 +622,6 @@ export default function MapComponent() {
           }
           animationRef.current = requestAnimationFrame(animate);
         } else {
-          // SELESAI TOTAL 
           if (!hasTriggeredFinishUI) {
               setIsPlaying(false); setIsFinished(true); setIsFormExpanded(true); 
               hasTriggeredFinishUI = true;
@@ -413,7 +632,6 @@ export default function MapComponent() {
         }
       }
       
-      // Tunggu flyTo selesai (2 Detik), baru mulai bergerak dan merekam!
       setTimeout(() => {
         if (shouldRecord && mediaRecorderRef.current) mediaRecorderRef.current.start();
         animationRef.current = requestAnimationFrame(animate);
@@ -437,20 +655,18 @@ export default function MapComponent() {
         {watermark && <div className="absolute bottom-6 left-6 z-30 text-white/70 font-black text-2xl drop-shadow-md pointer-events-none">{watermark}</div>}
       </div>
 
-    {/* --- PANEL JARAK REAL-TIME --- */}
       {(isPlaying || isFinished) && (
-        <div className="absolute top-6 left-6 md:top-auto md:bottom-10 md:left-auto md:right-6 z-40 bg-white/90 backdrop-blur-md px-5 py-3 rounded-2xl shadow-xl border border-white/50 flex flex-col items-start md:items-end transition-all">
-          {isRecording && (<div className="absolute -top-3 -right-2 bg-red-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1 animate-pulse shadow-lg"><div className="w-1.5 h-1.5 bg-white rounded-full"></div> REC</div>)}
-          <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1">Jarak Tempuh</span>
-          <div className="text-2xl font-black text-gray-800 tracking-tighter" ref={distanceRef}>0.0 KM</div>
+        <div className="absolute top-4 left-4 md:top-auto md:bottom-10 md:left-auto md:right-6 z-40 bg-white/90 backdrop-blur-md px-3 py-2 md:px-5 md:py-3 rounded-xl md:rounded-2xl shadow-xl border border-white/50 flex flex-col items-start md:items-end transition-all">
+          {isRecording && (<div className="absolute -top-2 -right-2 md:-top-3 md:-right-2 bg-red-500 text-white text-[9px] md:text-[10px] font-bold px-1.5 py-0.5 md:px-2 md:py-0.5 rounded-full flex items-center gap-1 animate-pulse shadow-lg"><div className="w-1.5 h-1.5 bg-white rounded-full"></div> REC</div>)}
+          <span className="text-[9px] md:text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-0.5 md:mb-1">Jarak Tempuh</span>
+          <div className="text-lg md:text-2xl font-black text-gray-800 tracking-tighter" ref={distanceRef}>0.0 KM</div>
           
-          {/* MUNCUL HANYA KETIKA SUDAH SELESAI */}
           {isFinished && estimasiWaktu && (
-             <div className="mt-1 text-sm font-bold text-green-600 animate-fade-in">Waktu: {estimasiWaktu}</div>
+             <div className="mt-0.5 md:mt-1 text-[11px] md:text-sm font-bold text-green-600 animate-fade-in">Waktu: {estimasiWaktu}</div>
           )}
         </div>
       )}
-      {/* --- TOMBOL REKAM (Di Luar Card, Pojok Kanan Atas) --- */}
+
       {!isPlaying && !isRecording && (
           <button 
               type="button" 
@@ -509,14 +725,18 @@ export default function MapComponent() {
         </div>
       )}
 
-      {/* --- UI PANEL RESPONSIF DRAWER --- */}
-      <div className={`absolute z-20 bg-white/95 backdrop-blur-md shadow-[0_-10px_40px_rgba(0,0,0,0.1)] transition-transform duration-500 ease-in-out flex flex-col md:top-6 md:left-6 md:w-85 md:rounded-2xl md:max-h-[90vh] md:border md:border-white/20 md:shadow-2xl md:bottom-auto bottom-0 left-0 w-full rounded-t-3xl max-h-[85vh] border-t border-white/20 ${isFormExpanded ? 'translate-y-0' : 'translate-y-[calc(100%-60px)] md:translate-y-0'}`}>
+      <div className={`absolute z-20 bg-white/95 backdrop-blur-md shadow-[0_-10px_40px_rgba(0,0,0,0.1)] transition-transform duration-500 ease-in-out flex flex-col md:top-6 md:left-6 md:w-85 md:rounded-2xl md:max-h-[90vh] md:border md:border-white/20 md:shadow-2xl md:bottom-auto bottom-0 left-0 w-full rounded-t-3xl max-h-[50vh] border-t border-white/20 ${isFormExpanded ? 'translate-y-0' : 'translate-y-[calc(100%-60px)] md:translate-y-0'}`}>
         <div className="flex flex-col items-center pt-3 pb-3 px-5 cursor-pointer md:cursor-default" onClick={() => setIsFormExpanded(!isFormExpanded)}>
           <div className="w-12 h-1.5 bg-gray-300 rounded-full mb-3 md:hidden"></div>
           <div className="w-full flex justify-between items-center">
-            {/* 👈 Mengganti ikon Route menjadi Bike di judul */}
             <h1 className="text-xl font-black text-gray-800 flex items-center gap-2">GassMudik <Bike className="w-5 h-5 text-blue-600" /></h1>
-            <button className="md:hidden text-xs font-bold text-blue-600 bg-blue-50 px-3 py-1.5 rounded-full">{isFormExpanded ? 'Tutup' : 'Buka Panel'}</button>
+            
+            <div className="flex items-center gap-2">
+              <button type="button" onClick={(e) => { e.stopPropagation(); handleReset(); }} className="text-[10px] font-bold text-gray-500 hover:text-red-500 bg-gray-100 hover:bg-red-50 px-2.5 py-1.5 rounded-lg transition-all flex items-center gap-1">
+                <RotateCcw className="w-3 h-3" /> Reset
+              </button>
+              <button className="md:hidden text-xs font-bold text-blue-600 bg-blue-50 px-3 py-1.5 rounded-full">{isFormExpanded ? 'Tutup' : 'Buka'}</button>
+            </div>
           </div>
         </div>
 
@@ -554,7 +774,6 @@ export default function MapComponent() {
                 disabled={isLoading} 
                 className={`mt-3 w-full py-3.5 rounded-xl text-sm font-black text-white transition-all shadow-lg flex items-center justify-center gap-2 ${isLoading ? 'bg-gray-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700 active:scale-95 shadow-blue-500/30'}`}
             >
-                {/* 👈 Mengganti ikon Route menjadi Bike di tombol utama */}
                 <Bike className="w-4 h-4" /> {isLoading ? 'Menyiapkan Rute...' : 'Gass!!'}
             </button>
 
@@ -564,6 +783,7 @@ export default function MapComponent() {
 
       <style dangerouslySetInnerHTML={{__html: `
         .custom-scrollbar::-webkit-scrollbar { width: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
         .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
         input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 14px; height: 14px; border-radius: 50%; background: #2563eb; cursor: pointer; border: 2px solid white; box-shadow: 0 1px 3px rgba(0,0,0,0.3); }
         .custom-chat-bubble { background-color: white; color: #1f2937; padding: 4px 10px; border-radius: 8px; font-weight: 900; font-size: 12px; box-shadow: 0 4px 10px rgba(0,0,0,0.15); position: relative; max-width: 150px; white-space: normal; word-wrap: break-word; text-align: center; line-height: 1.2; border: 1.5px solid #e5e7eb; transition: all 0.2s ease; }

@@ -20,6 +20,7 @@ export default function VideoSettings({
 }: VideoSettingsProps) {
   return (
     <div className="bg-blue-50/50 p-4 rounded-2xl border border-blue-100 flex flex-col gap-3 shadow-sm mt-1">
+      {/* ... (Bagian format video tetap sama) ... */}
       <div>
         <label className="text-[10px] font-bold text-blue-600 uppercase tracking-wider">Format Video Peta</label>
         <div className="flex gap-2 mt-1.5">
@@ -43,8 +44,9 @@ export default function VideoSettings({
             <label className="text-[10px] font-bold text-gray-500">Durasi Perjalanan</label>
             <span className="text-[10px] font-bold text-blue-600">{duration} Detik</span>
           </div>
+          {/* PERUBAHAN DI SINI: min="15", max="45" */}
           <input 
-            type="range" min="3" max="30" step="1" 
+            type="range" min="15" max="45" step="1" 
             value={duration} 
             onChange={(e) => onDurationChange(parseInt(e.target.value))} 
             disabled={isPlaying} 

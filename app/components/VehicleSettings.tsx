@@ -17,16 +17,16 @@ export const VEHICLE_OPTIONS: Record<string, any> = {
     label: 'Mobil',
     icon: Car,
     variants: [
-      { name: 'Mobil 1', url: '/mobil1.png', size: 0.12, rot: 0 },
-      { name: 'Mobil 2', url: '/mobil2.png', size: 0.12, rot: 0 },
-      { name: 'Mobil 3', url: '/mobil3.png', size: 0.12, rot: 0 },
+      { name: 'Mobil 1', url: '/mobil1.png', size: 0.12, rot: -90 },
+      { name: 'Mobil 2', url: '/mobil2.png', size: 0.12, rot: -90 },
+      { name: 'Mobil 3', url: '/mobil3.png', size: 0.12, rot: -90 },
     ]
   },
   pesawat: {
     label: 'Pesawat',
     icon: Plane,
     variants: [
-      { name: 'Pesawat 1', url: '/pesawat1.png', size: 0.15, rot: 90 },
+      { name: 'Pesawat 1', url: '/pesawat1.png', size: 0.15, rot: -90 },
       { name: 'Pesawat 2', url: '/pesawat2.png', size: 0.15, rot: 90 },
     ]
   },
@@ -34,8 +34,8 @@ export const VEHICLE_OPTIONS: Record<string, any> = {
     label: 'Kapal',
     icon: Ship,
     variants: [
-      { name: 'Kapal 1', url: '/kapal1.png', size: 0.15, rot: 0 },
-      { name: 'Kapal 2', url: '/kapal2.png', size: 0.15, rot: 0 },
+      { name: 'Kapal 1', url: '/kapal1.png', size: 0.15, rot: -90 },
+      { name: 'Kapal 2', url: '/kapal2.png', size: 0.15, rot: -90 },
     ]
   }
 };
@@ -205,7 +205,7 @@ export default function VehicleSettings({
       
       {/* --- 6. ARAH HADAP --- */}
       <div className="pt-4 border-t border-gray-100 mt-1 flex items-center justify-between w-full px-1">
-        <label className="text-[10px] font-bold text-gray-500">Arah Hadap Muka</label>
+        <label className="text-[10px] font-bold text-gray-500">Arah Perjalanan</label>
         <div className="flex gap-1.5 p-1 bg-gray-100 rounded-xl">
           <button 
             type="button" 

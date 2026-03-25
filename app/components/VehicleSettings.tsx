@@ -27,7 +27,7 @@ export const VEHICLE_OPTIONS: Record<string, any> = {
     icon: Plane,
     variants: [
       { name: 'Pesawat 1', url: '/pesawat1.png', size: 0.15, rot: -90 },
-      { name: 'Pesawat 2', url: '/pesawat2.png', size: 0.15, rot: 90 },
+      { name: 'Pesawat 2', url: '/pesawat2.png', size: 0.15, rot: -90 },
     ]
   },
   kapal: {

@@ -5,7 +5,8 @@ import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import * as turf from '@turf/turf';
 
-import { Bike, Image as ImageIcon, ZoomIn, ZoomOut, Scissors, Plus, X, Video, ArrowLeftRight, ArrowRight, RotateCcw } from 'lucide-react';
+// Menambahkan ikon Rocket untuk tombol Gass!
+import { Bike, Image as ImageIcon, ZoomIn, ZoomOut, Scissors, Plus, X, Video, ArrowLeftRight, ArrowRight, RotateCcw, Rocket } from 'lucide-react';
 
 import CityInput from './CityInput'; 
 import VehicleSettings, { VEHICLE_OPTIONS } from './VehicleSettings';
@@ -44,7 +45,8 @@ export default function MapComponent() {
   
   const [videoDuration, setVideoDuration] = useState(15); 
   const [videoResolution, setVideoResolution] = useState('full');
-  const [watermark, setWatermark] = useState('');
+  
+  const [endImage, setEndImage] = useState<string | null>(null);
 
   const customLabelRef = useRef(''); 
   const rotationOffsetRef = useRef(90); 
@@ -188,26 +190,11 @@ export default function MapComponent() {
                         map.setLayoutProperty('motor-layer', 'icon-image', newImageId);
                         map.setLayoutProperty('motor-layer', 'icon-size', modelSize);
                         map.setLayoutProperty('motor-layer', 'icon-rotate', rotationOffsetRef.current);
-                        // PERBAIKAN: gunakan setPaintProperty untuk translate
                         map.setPaintProperty('motor-layer', 'icon-translate', [0, 0]); 
                         map.setLayoutProperty('motor-layer', 'visibility', 'visible');
                     } else {
                         map.addSource('motor', { type: 'geojson', data: point });
-                        map.addLayer({ 
-                            id: 'motor-layer', 
-                            type: 'symbol', 
-                            source: 'motor', 
-                            layout: { 
-                                'icon-image': newImageId, 
-                                'icon-size': modelSize, 
-                                'icon-allow-overlap': true, 
-                                'icon-rotation-alignment': 'map', 
-                                'icon-rotate': rotationOffsetRef.current 
-                            },
-                            paint: {
-                                'icon-translate': [0, 0] // PERBAIKAN: dipindah ke paint
-                            }
-                        });
+                        map.addLayer({ id: 'motor-layer', type: 'symbol', source: 'motor', layout: { 'icon-image': newImageId, 'icon-size': modelSize, 'icon-allow-overlap': true, 'icon-rotation-alignment': 'map', 'icon-rotate': rotationOffsetRef.current }, paint: { 'icon-translate': [0, 0] } });
                     }
                 } else {
                     if (map.getLayer('motor-layer')) map.setLayoutProperty('motor-layer', 'visibility', 'none');
@@ -308,7 +295,7 @@ export default function MapComponent() {
     setTitikSinggah([]);
     setCustomLabel('');
     customLabelRef.current = '';
-    setWatermark('');
+    setEndImage(null); 
     
     setVehicleCategory('mobil');
     setVehicleType('/car.png');
@@ -340,7 +327,6 @@ export default function MapComponent() {
         (mapRef.current.getSource('motor') as maplibregl.GeoJSONSource).setData(turf.featureCollection([]));
       }
       if (mapRef.current.getLayer('motor-layer')) {
-          // PERBAIKAN: reset translate menggunakan setPaintProperty
           mapRef.current.setPaintProperty('motor-layer', 'icon-translate', [0, 0]);
       }
       mapRef.current.flyTo({ center: [108.5, -6.8], zoom: 6, pitch: 0, bearing: 0, duration: 1500 });
@@ -348,6 +334,17 @@ export default function MapComponent() {
   };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => { const file = e.target.files?.[0]; if (file) { setTempFile(file); setBgWarningOpen(true); } e.target.value = ''; };
+  
+  const handleEndImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onload = (event) => setEndImage(event.target?.result as string);
+      reader.readAsDataURL(file);
+    }
+    e.target.value = '';
+  };
+
   const handleMouseDown = (e: React.MouseEvent | React.TouchEvent) => { setIsDragging(true); const clientX = 'touches' in e ? e.touches[0].clientX : (e as React.MouseEvent).clientX; const clientY = 'touches' in e ? e.touches[0].clientY : (e as React.MouseEvent).clientY; setDragStart({ x: clientX - pan.x, y: clientY - pan.y }); };
   const handleMouseMove = (e: React.MouseEvent | React.TouchEvent) => { if (!isDragging) return; const clientX = 'touches' in e ? e.touches[0].clientX : (e as React.MouseEvent).clientX; const clientY = 'touches' in e ? e.touches[0].clientY : (e as React.MouseEvent).clientY; setPan({ x: clientX - dragStart.x, y: clientY - dragStart.y }); };
   const handleMouseUp = () => setIsDragging(false);
@@ -386,10 +383,21 @@ export default function MapComponent() {
     const map = mapRef.current;
     
     setIsLoading(true); setIsFinished(false); setIsRecording(shouldRecord);
+    
+    // --- PERBAIKAN: Menutup form setiap kali Gass atau Rekam ditekan ---
+    setIsFormExpanded(false); 
+
     if (distanceRef.current) distanceRef.current.innerText = "0.0 KM"; 
     if (animationRef.current) cancelAnimationFrame(animationRef.current);
 
     try {
+      let loadedEndImage: HTMLImageElement | null = null;
+      if (shouldRecord && endImage) {
+          loadedEndImage = new Image();
+          loadedEndImage.src = endImage;
+          await new Promise((resolve) => { loadedEndImage!.onload = resolve; });
+      }
+
       const startCoord = await getCoordinates(asal);
       const endCoord = await getCoordinates(tujuan);
       const validWaypoints = titikSinggah.filter(wp => wp.trim() !== '');
@@ -449,7 +457,6 @@ export default function MapComponent() {
         map.setLayoutProperty('motor-layer', 'icon-image', newImageId); 
         map.setLayoutProperty('motor-layer', 'icon-size', modelSize);
         map.setLayoutProperty('motor-layer', 'icon-rotate', initialBearing + rotationOffsetRef.current);
-        // PERBAIKAN: gunakan setPaintProperty untuk icon-translate
         map.setPaintProperty('motor-layer', 'icon-translate', [0, 0]);
         map.setLayoutProperty('motor-layer', 'visibility', 'visible');
       } else {
@@ -467,7 +474,7 @@ export default function MapComponent() {
                 'visibility': 'visible'
             },
             paint: {
-                'icon-translate': [0, 0] // PERBAIKAN: ditaruh di dalam object paint
+                'icon-translate': [0, 0] 
             }
         });
       }
@@ -508,7 +515,6 @@ export default function MapComponent() {
       }
 
       setIsLoading(false); setIsPlaying(true); 
-      if (shouldRecord) { setIsFormExpanded(false); }
 
       map.flyTo({ center: startCoord, zoom: 8, pitch: 50, duration: 2000 });
       
@@ -540,11 +546,9 @@ export default function MapComponent() {
             const bounceY = -Math.abs(Math.sin(elapsed / 120)) * 8; 
             const wobble = Math.cos(elapsed / 120) * 3; 
 
-            // PERBAIKAN: Update posisi lompatan menggunakan setPaintProperty
             map.setPaintProperty('motor-layer', 'icon-translate', [0, bounceY]);
             map.setLayoutProperty('motor-layer', 'icon-rotate', bearing + rotationOffsetRef.current + wobble); 
         } else {
-            // PERBAIKAN: Kembalikan translate menggunakan setPaintProperty
             map.setPaintProperty('motor-layer', 'icon-translate', [0, 0]);
             map.setLayoutProperty('motor-layer', 'icon-rotate', currentBearingRef.current + rotationOffsetRef.current);
         }
@@ -602,38 +606,61 @@ export default function MapComponent() {
                  boxHeight = 50 * dpr; 
              }
 
-             const startX = 20 * dpr;
-             const startY = 20 * dpr;
+             const startX = (exportCanvas.width / 2) - (boxWidth / 2);
+             const startY = 40 * dpr;
 
              exportCtx.fillStyle = 'rgba(255,255,255,0.9)';
              if (typeof (exportCtx as any).roundRect === 'function') {
                  exportCtx.beginPath();
-                 (exportCtx as any).roundRect(startX, startY, boxWidth, boxHeight, 8 * dpr);
+                 exportCtx.roundRect(startX, startY, boxWidth, boxHeight, 15 * dpr); 
                  exportCtx.fill();
              } else {
                  exportCtx.fillRect(startX, startY, boxWidth, boxHeight);
              }
              
              exportCtx.fillStyle = '#1f2937';
-             exportCtx.textAlign = 'left';
+             exportCtx.textAlign = 'center'; 
              exportCtx.font = `900 ${16 * dpr}px sans-serif`;
-             exportCtx.fillText(distText, startX + 15 * dpr, startY + 22 * dpr);
+             exportCtx.fillText(distText, startX + (boxWidth / 2), startY + 22 * dpr);
              
              if (progress >= 1 && estimasiWaktuRef.current) {
                  exportCtx.font = `bold ${12 * dpr}px sans-serif`;
                  exportCtx.fillStyle = '#16a34a'; 
-                 exportCtx.fillText(`Waktu: ${estimasiWaktuRef.current}`, startX + 15 * dpr, startY + 40 * dpr);
+                 exportCtx.fillText(`Waktu: ${estimasiWaktuRef.current}`, startX + (boxWidth / 2), startY + 40 * dpr);
              }
+             
+             exportCtx.textAlign = 'left';
 
-             if (watermark) {
-                exportCtx.font = `bold ${28 * dpr}px sans-serif`; exportCtx.fillStyle = "rgba(255, 255, 255, 0.8)";
-                exportCtx.shadowColor = "rgba(0, 0, 0, 0.5)"; exportCtx.shadowBlur = 4 * dpr;
-                exportCtx.fillText(watermark, 30 * dpr, exportCanvas.height - 40 * dpr);
-                exportCtx.shadowBlur = 0; 
+             if (progress >= 1 && loadedEndImage) {
+                const holdElapsed = elapsed - (videoDuration * 1000);
+                const alpha = Math.min(holdElapsed / 500, 1); 
+                exportCtx.globalAlpha = alpha;
+
+                exportCtx.fillStyle = 'rgba(0,0,0,0.6)';
+                exportCtx.fillRect(0, 0, exportCanvas.width, exportCanvas.height);
+
+                const canvasRatio = exportCanvas.width / exportCanvas.height;
+                const imgRatio = loadedEndImage.width / loadedEndImage.height;
+                let drawW = exportCanvas.width;
+                let drawH = exportCanvas.height;
+                let drawX = 0;
+                let drawY = 0;
+
+                if (imgRatio > canvasRatio) {
+                    drawH = exportCanvas.width / imgRatio;
+                    drawY = (exportCanvas.height - drawH) / 2;
+                } else {
+                    drawW = exportCanvas.height * imgRatio;
+                    drawX = (exportCanvas.width - drawW) / 2;
+                }
+
+                exportCtx.drawImage(loadedEndImage, drawX, drawY, drawW, drawH);
+                exportCtx.globalAlpha = 1.0; 
              }
         }
 
-        const totalDurationMs = shouldRecord ? (videoDuration * 1000) + 3000 : (videoDuration * 1000);
+        const endScreenDuration = loadedEndImage ? 4000 : 3000;
+        const totalDurationMs = shouldRecord ? (videoDuration * 1000) + endScreenDuration : (videoDuration * 1000);
 
         if (elapsed < totalDurationMs) {
           if (isAnimationDone && !hasTriggeredFinishUI) {
@@ -674,30 +701,18 @@ export default function MapComponent() {
         }`}
       >
         <div ref={mapContainer} className="absolute inset-0 w-full h-full" />
-        {watermark && <div className="absolute bottom-6 left-6 z-30 text-white/70 font-black text-2xl drop-shadow-md pointer-events-none">{watermark}</div>}
       </div>
 
       {(isPlaying || isFinished) && (
-        <div className="absolute top-4 left-4 md:top-auto md:bottom-10 md:left-auto md:right-6 z-40 bg-white/90 backdrop-blur-md px-3 py-2 md:px-5 md:py-3 rounded-xl md:rounded-2xl shadow-xl border border-white/50 flex flex-col items-start md:items-end transition-all">
-          {isRecording && (<div className="absolute -top-2 -right-2 md:-top-3 md:-right-2 bg-red-500 text-white text-[9px] md:text-[10px] font-bold px-1.5 py-0.5 md:px-2 md:py-0.5 rounded-full flex items-center gap-1 animate-pulse shadow-lg"><div className="w-1.5 h-1.5 bg-white rounded-full"></div> REC</div>)}
-          <span className="text-[9px] md:text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-0.5 md:mb-1">Jarak Tempuh</span>
-          <div className="text-lg md:text-2xl font-black text-gray-800 tracking-tighter" ref={distanceRef}>0.0 KM</div>
+        <div className="absolute top-12 left-1/2 -translate-x-1/2 z-40 bg-white/90 backdrop-blur-md px-4 py-2 rounded-full shadow-lg border border-white/50 flex flex-col items-center transition-all min-w-30">
+          {isRecording && (<div className="absolute -top-1 -right-1 bg-red-500 text-white text-[8px] font-bold px-1.5 py-0.5 rounded-full flex items-center gap-1 animate-pulse shadow-md"><div className="w-1.5 h-1.5 bg-white rounded-full"></div> REC</div>)}
+          <span className="text-[8px] font-bold text-gray-400 uppercase tracking-widest">Jarak Tempuh</span>
+          <div className="text-base font-black text-gray-800 tracking-tighter" ref={distanceRef}>0.0 KM</div>
           
           {isFinished && estimasiWaktu && (
-             <div className="mt-0.5 md:mt-1 text-[11px] md:text-sm font-bold text-green-600 animate-fade-in">Waktu: {estimasiWaktu}</div>
+             <div className="mt-0.5 text-[10px] font-bold text-green-600 animate-fade-in">Waktu: {estimasiWaktu}</div>
           )}
         </div>
-      )}
-
-      {!isPlaying && !isRecording && (
-          <button 
-              type="button" 
-              onClick={() => handleGassMudik(true)} 
-              disabled={isLoading} 
-              className={`absolute top-6 right-6 z-40 px-5 py-3 rounded-2xl text-sm font-black text-white transition-all shadow-2xl flex items-center justify-center gap-2 border border-white/20 backdrop-blur-sm ${isLoading ? 'bg-gray-400 cursor-not-allowed' : 'bg-red-500/90 hover:bg-red-600 active:scale-95'}`}
-          >
-              <Video className="w-5 h-5" /> {isLoading ? 'Menyiapkan...' : 'Rekam Video'}
-          </button>
       )}
 
       {bgWarningOpen && (
@@ -751,13 +766,33 @@ export default function MapComponent() {
         <div className="flex flex-col items-center pt-3 pb-3 px-5 cursor-pointer md:cursor-default" onClick={() => setIsFormExpanded(!isFormExpanded)}>
           <div className="w-12 h-1.5 bg-gray-300 rounded-full mb-3 md:hidden"></div>
           <div className="w-full flex justify-between items-center">
-            <h1 className="text-xl font-black text-gray-800 flex items-center gap-2">GassMudik <Bike className="w-5 h-5 text-blue-600" /></h1>
+            <h1 className="text-lg font-bold text-gray-800 flex items-center gap-2">GassMudik <Bike className="w-5 h-5 text-blue-600" /></h1>
             
-            <div className="flex items-center gap-2">
-              <button type="button" onClick={(e) => { e.stopPropagation(); handleReset(); }} className="text-[10px] font-bold text-gray-500 hover:text-red-500 bg-gray-100 hover:bg-red-50 px-2.5 py-1.5 rounded-lg transition-all flex items-center gap-1">
-                <RotateCcw className="w-3 h-3" /> Reset
+            {/* --- PERBAIKAN: HEADER TOMBOL --- */}
+            <div className="flex items-center gap-1.5">
+              {!isPlaying && !isRecording && (
+                  <>
+                  <button 
+                      type="button" 
+                      onClick={(e) => { e.stopPropagation(); handleGassMudik(true); }} 
+                      disabled={isLoading} 
+                      className={`text-[10px] font-bold text-white bg-red-500 hover:bg-red-600 px-2.5 py-1.5 rounded-lg transition-all flex items-center gap-1 shadow-md shadow-red-500/30 ${isLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
+                  >
+                      <Video className="w-3 h-3" /> {isLoading ? 'Wait..' : 'Rekam'}
+                  </button>
+                  <button 
+                      type="button" 
+                      onClick={(e) => { e.stopPropagation(); handleGassMudik(false); }} 
+                      disabled={isLoading} 
+                      className={`text-[10px] font-bold text-white bg-blue-600 hover:bg-blue-700 px-2.5 py-1.5 rounded-lg transition-all flex items-center gap-1 shadow-md shadow-blue-500/30 ${isLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
+                  >
+                      <Rocket className="w-3 h-3" /> {isLoading ? 'Wait..' : 'Previw'}
+                  </button>
+                  </>
+              )}
+              <button className="md:hidden text-xs font-bold text-blue-600 bg-blue-50 px-3 py-1.5 rounded-full" onClick={() => setIsFormExpanded(!isFormExpanded)}>
+                {isFormExpanded ? 'Tutup' : 'Buka'}
               </button>
-              <button className="md:hidden text-xs font-bold text-blue-600 bg-blue-50 px-3 py-1.5 rounded-full">{isFormExpanded ? 'Tutup' : 'Buka'}</button>
             </div>
           </div>
         </div>
@@ -766,7 +801,7 @@ export default function MapComponent() {
           <form className="flex flex-col gap-3" onSubmit={(e) => e.preventDefault()}>
             
             <VehicleSettings vehicleType={vehicleType} onVehicleChange={handleVehicleChange} customLabel={customLabel} onLabelChange={handleLabelChange} modelSize={modelSize} onSizeChange={handleSizeChange} rotationUI={rotationUI} onRotationChange={handleRotationChange} isFlipped={isFlipped} onFlipChange={() => setIsFlipped(!isFlipped)} isPlaying={isRecording} onFileUpload={handleFileUpload} vehicleCategory={vehicleCategory} onCategoryChange={handleCategoryChange} />
-            <VideoSettings duration={videoDuration} onDurationChange={setVideoDuration} resolution={videoResolution} onResolutionChange={setVideoResolution} watermark={watermark} onWatermarkChange={setWatermark} isPlaying={isRecording} />
+            <VideoSettings duration={videoDuration} onDurationChange={setVideoDuration} resolution={videoResolution} onResolutionChange={setVideoResolution} endImage={endImage} onEndImageChange={handleEndImageUpload} onRemoveEndImage={() => setEndImage(null)} isPlaying={isRecording} />
 
             <div className="relative z-30 mt-2">
               <label className="text-[10px] font-bold text-gray-500 uppercase tracking-wider ml-1">Lokasi Asal</label>
@@ -790,13 +825,14 @@ export default function MapComponent() {
               <CityInput value={tujuan} onChange={(val: string) => setTujuan(val)} disabled={isRecording} placeholder="Ketik tujuan..." inputClassName="w-full mt-1 px-4 py-2.5 bg-gray-100 text-gray-800 text-sm rounded-xl outline-none focus:ring-2 focus:ring-green-500 transition-all disabled:opacity-50 font-medium" />
             </div>
 
+            {/* --- PERBAIKAN: TOMBOL RESET --- */}
             <button 
                 type="button" 
-                onClick={() => handleGassMudik(false)} 
+                onClick={() => handleReset()} 
                 disabled={isLoading} 
-                className={`mt-3 w-full py-3.5 rounded-xl text-sm font-black text-white transition-all shadow-lg flex items-center justify-center gap-2 ${isLoading ? 'bg-gray-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700 active:scale-95 shadow-blue-500/30'}`}
+                className={`mt-3 w-full py-3.5 rounded-xl text-sm font-bold text-gray-500 bg-gray-100 hover:bg-red-50 hover:text-red-600 transition-all active:scale-95 border border-gray-200 flex items-center justify-center gap-2 ${isLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
             >
-                <Bike className="w-4 h-4" /> {isLoading ? 'Menyiapkan Rute...' : 'Gass!!'}
+                <RotateCcw className="w-4 h-4" /> Reset Peta
             </button>
 
           </form>

@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useMemo } from 'react';
-import { Bike, Car, Plane, Ship, Image as ImageIcon, ArrowLeft, ArrowRight, Sparkles, Pencil } from 'lucide-react';
+import { Bike, Car, Plane, Ship, Image as ImageIcon, ArrowLeft, ArrowRight, Sparkles, Pencil, X } from 'lucide-react';
 
 // --- DATA MOCK KENDARAAN (AVATAR) ---
 export const VEHICLE_OPTIONS: Record<string, any> = {
@@ -9,33 +9,33 @@ export const VEHICLE_OPTIONS: Record<string, any> = {
     label: 'Motor',
     icon: Bike,
     variants: [
-      { name: 'Motor 1', url: '/motor1.png', size: 0.15, rot: -90 },
-      { name: 'Motor 2', url: '/motor2.png', size: 0.15, rot: -90 },
+      { name: 'Motor 1', url: '/motor1.png', size: 0.07, rot: -90 },
+      { name: 'Motor 2', url: '/motor2.png', size: 0.07, rot: -90 },
     ]
   },
   mobil: {
     label: 'Mobil',
     icon: Car,
     variants: [
-      { name: 'Mobil 1', url: '/mobil1.png', size: 0.12, rot: -90 },
-      { name: 'Mobil 2', url: '/mobil2.png', size: 0.12, rot: -90 },
-      { name: 'Mobil 3', url: '/mobil3.png', size: 0.12, rot: -90 },
+      { name: 'Mobil 1', url: '/mobil1.png', size: 0.07, rot: -90 },
+      { name: 'Mobil 2', url: '/mobil2.png', size: 0.07, rot: -90 },
+      { name: 'Mobil 3', url: '/mobil3.png', size: 0.07, rot: -90 },
     ]
   },
   pesawat: {
     label: 'Pesawat',
     icon: Plane,
     variants: [
-      { name: 'Pesawat 1', url: '/pesawat1.png', size: 0.15, rot: -90 },
-      { name: 'Pesawat 2', url: '/pesawat2.png', size: 0.15, rot: -90 },
+      { name: 'Pesawat 1', url: '/pesawat1.png', size: 0.07, rot: -90 },
+      { name: 'Pesawat 2', url: '/pesawat2.png', size: 0.07, rot: -90 },
     ]
   },
   kapal: {
     label: 'Kapal',
     icon: Ship,
     variants: [
-      { name: 'Kapal 1', url: '/kapal1.png', size: 0.15, rot: -90 },
-      { name: 'Kapal 2', url: '/kapal2.png', size: 0.15, rot: -90 },
+      { name: 'Kapal 1', url: '/kapal1.png', size: 0.07, rot: -90 },
+      { name: 'Kapal 2', url: '/kapal2.png', size: 0.07, rot: -90 },
     ]
   }
 };
@@ -55,6 +55,8 @@ interface VehicleSettingsProps {
   onFlipChange: () => void;
   isPlaying: boolean;
   onFileUpload: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  customImage: string | null; 
+  onRemoveCustomImage: () => void;
 }
 
 export default function VehicleSettings({
@@ -64,7 +66,8 @@ export default function VehicleSettings({
   modelSize, onSizeChange,
   rotationUI, onRotationChange,
   isFlipped, onFlipChange,
-  isPlaying, onFileUpload
+  isPlaying, onFileUpload,
+  customImage, onRemoveCustomImage
 }: VehicleSettingsProps) {
 
   // Mengambil daftar varian/avatar berdasarkan kategori yang aktif
@@ -132,20 +135,16 @@ export default function VehicleSettings({
                       isSelected ? 'border-blue-500 shadow-md ring-2 ring-blue-100' : 'border-gray-100 hover:border-gray-300'
                     }`}
                   >
-                    {/* Gambar Avatar Kendaraan */}
-                    {/* Pastikan gambar ini sudah ada di folder public Anda! */}
                     <img 
                       src={variant.url} 
                       alt={variant.name} 
                       className={`w-full h-full object-contain p-1.5 transition-transform ${isSelected ? 'scale-110' : 'group-hover:scale-105'}`} 
                     />
                     
-                    {/* Tooltip Nama Kendaraan */}
                     <div className="absolute inset-x-0 bottom-0 bg-linear-to-t from-black/60 to-transparent pt-4 pb-1 px-1 opacity-0 group-hover:opacity-100 transition-opacity">
                        <span className="text-[8px] font-bold text-white block truncate leading-tight drop-shadow-md">{variant.name}</span>
                     </div>
 
-                    {/* Checkmark jika terpilih */}
                     {isSelected && (
                       <div className="absolute top-1 right-1 bg-blue-500 rounded-full w-3 h-3 flex items-center justify-center shadow-sm">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" className="w-2 h-2 text-white"><polyline points="20 6 9 17 4 12"></polyline></svg>
@@ -161,12 +160,25 @@ export default function VehicleSettings({
           <div className="w-full text-center py-2">
             <Sparkles className="w-6 h-6 text-orange-400 mx-auto mb-2" />
             <label className="text-[10px] font-bold text-gray-600 uppercase tracking-wider block mb-2">Upload PNG Sendiri</label>
-            <input 
-              type="file" accept="image/*" 
-              onChange={onFileUpload} 
-              disabled={isPlaying} 
-              className="w-full text-[11px] file:mr-2 file:py-1.5 file:px-4 file:rounded-full file:border-0 file:font-bold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 cursor-pointer bg-white border border-gray-200 rounded-full p-1" 
-            />
+            
+            {customImage ? (
+                <div className="flex items-center justify-between gap-2 mt-2 bg-blue-50 p-2 rounded-xl border border-blue-100">
+                  <div className="flex items-center gap-2 overflow-hidden">
+                    <img src={customImage} alt="Custom" className="w-8 h-8 object-contain bg-white rounded border border-gray-200 p-0.5" />
+                    <span className="text-xs font-bold text-blue-700 truncate">Gambar Tersimpan</span>
+                  </div>
+                  <button type="button" onClick={onRemoveCustomImage} className="p-1.5 bg-white text-red-500 border border-gray-200 rounded-lg hover:bg-red-50 hover:border-red-200 transition-all shadow-sm active:scale-95">
+                    <X className="w-4 h-4"/>
+                  </button>
+                </div>
+            ) : (
+                <input 
+                  type="file" accept="image/*" 
+                  onChange={onFileUpload} 
+                  disabled={isPlaying} 
+                  className="w-full text-[11px] file:mr-2 file:py-1.5 file:px-4 file:rounded-full file:border-0 file:font-bold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 cursor-pointer bg-white border border-gray-200 rounded-full p-1" 
+                />
+            )}
           </div>
         )}
       </div>

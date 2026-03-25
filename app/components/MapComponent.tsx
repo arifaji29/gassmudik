@@ -12,6 +12,10 @@ import VehicleSettings, { VEHICLE_OPTIONS } from './VehicleSettings';
 import VideoSettings from './VideoSettings';
 import { getProcessedImageData, getCoordinates } from '../utils/mapUtils';
 
+function easeInOutSine(x: number): number {
+  return -(Math.cos(Math.PI * x) - 1) / 2;
+}
+
 export default function MapComponent() {
   const mapContainer = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
@@ -31,10 +35,10 @@ export default function MapComponent() {
   const [titikSinggah, setTitikSinggah] = useState<string[]>([]); 
   
   const [vehicleCategory, setVehicleCategory] = useState('mobil'); 
-  const [vehicleType, setVehicleType] = useState('/car.png'); 
+  const [vehicleType, setVehicleType] = useState('/mobil1.png'); 
   const [customImage, setCustomImage] = useState<string | null>(null);
-  const [modelSize, setModelSize] = useState(0.12); 
-  const [rotationUI, setRotationUI] = useState(90);
+  const [modelSize, setModelSize] = useState(0.07); 
+  const [rotationUI, setRotationUI] = useState(-90); 
   const [isFlipped, setIsFlipped] = useState(false); 
   const [customLabel, setCustomLabel] = useState('');
   
@@ -44,7 +48,7 @@ export default function MapComponent() {
   const [endImage, setEndImage] = useState<string | null>(null);
 
   const customLabelRef = useRef(''); 
-  const rotationOffsetRef = useRef(90); 
+  const rotationOffsetRef = useRef(-90); 
   const currentBearingRef = useRef(0); 
   const estimasiWaktuRef = useRef<string | null>(null); 
   
@@ -293,11 +297,11 @@ export default function MapComponent() {
     setEndImage(null); 
     
     setVehicleCategory('mobil');
-    setVehicleType('/car.png');
+    setVehicleType('/mobil1.png');
     setCustomImage(null);
     setModelSize(0.12);
-    setRotationUI(90);
-    rotationOffsetRef.current = 90;
+    setRotationUI(-90);
+    rotationOffsetRef.current = -90;
     setIsFlipped(false);
     setIsEditorFlipped(false);
     
@@ -572,7 +576,6 @@ export default function MapComponent() {
                 exportCtx!.fillStyle = '#1f2937'; exportCtx!.fillText(text, x + 16 * dpr, y + 4 * dpr);
              });
 
-             // --- PERBAIKAN: TEXT BUBBLE MULTI-LINE (WORD WRAPPING) ---
              if (customLabelRef.current.trim() !== '') {
                 const vehPos = map.project(currentPoint.geometry.coordinates as [number, number]);
                 const vx = vehPos.x * dpr;
@@ -582,7 +585,6 @@ export default function MapComponent() {
                 const fontSize = 12 * dpr;
                 exportCtx.font = `900 ${fontSize}px sans-serif`;
                 
-                // Logika Pemecah Baris (Word Wrap)
                 const maxWidth = 150 * dpr;
                 const words = text.split(' ');
                 const lines: string[] = [];
@@ -600,7 +602,6 @@ export default function MapComponent() {
                 }
                 lines.push(currentLine);
 
-                // Hitung Dimensi Box Bubble
                 const lineHeight = fontSize * 1.2;
                 let maxLineWidth = 0;
                 lines.forEach(line => {
@@ -616,7 +617,6 @@ export default function MapComponent() {
                 const boxX = vx - boxWidth / 2;
                 const boxY = vy - boxHeight - (6 * dpr); 
 
-                // Gambar Background Bubble
                 exportCtx.fillStyle = 'white';
                 if (typeof (exportCtx as any).roundRect === 'function') {
                     exportCtx.beginPath();
@@ -632,7 +632,6 @@ export default function MapComponent() {
                     exportCtx.strokeRect(boxX, boxY, boxWidth, boxHeight);
                 }
 
-                // Gambar Ekor Bubble (Segitiga Bawah)
                 exportCtx.beginPath();
                 exportCtx.moveTo(vx - 6 * dpr, boxY + boxHeight - 1.5 * dpr); 
                 exportCtx.lineTo(vx + 6 * dpr, boxY + boxHeight - 1.5 * dpr);
@@ -640,7 +639,6 @@ export default function MapComponent() {
                 exportCtx.fillStyle = 'white';
                 exportCtx.fill();
 
-                // Cetak Teks (Bisa Multi-baris)
                 exportCtx.fillStyle = '#1f2937';
                 exportCtx.textAlign = 'center';
                 exportCtx.textBaseline = 'top';
@@ -650,7 +648,6 @@ export default function MapComponent() {
                     exportCtx.fillText(line, vx, textStartY + index * lineHeight);
                 });
 
-                // Reset ke default agar elemen lain (Jarak) tidak berantakan
                 exportCtx.textAlign = 'left';
                 exportCtx.textBaseline = 'alphabetic';
              }
@@ -830,7 +827,7 @@ export default function MapComponent() {
         <div className="flex flex-col items-center pt-3 pb-3 px-5 cursor-pointer md:cursor-default" onClick={() => setIsFormExpanded(!isFormExpanded)}>
           <div className="w-12 h-1.5 bg-gray-300 rounded-full mb-3 md:hidden"></div>
           <div className="w-full flex justify-between items-center">
-            <h1 className="text-lg font-semibold text-gray-800 flex items-center gap-2">GassMudik <Bike className="w-5 h-5 text-blue-600" /></h1>
+            <h2 className="text-lg font-bold text-gray-800 flex items-center gap-2">GassMudik <Bike className="w-5 h-5 text-blue-600" /></h2>
             
             <div className="flex items-center gap-1.5">
               {!isPlaying && !isRecording && (
@@ -863,7 +860,25 @@ export default function MapComponent() {
         <div className="overflow-y-auto px-5 pb-8 custom-scrollbar">
           <form className="flex flex-col gap-3" onSubmit={(e) => e.preventDefault()}>
             
-            <VehicleSettings vehicleType={vehicleType} onVehicleChange={handleVehicleChange} customLabel={customLabel} onLabelChange={handleLabelChange} modelSize={modelSize} onSizeChange={handleSizeChange} rotationUI={rotationUI} onRotationChange={handleRotationChange} isFlipped={isFlipped} onFlipChange={() => setIsFlipped(!isFlipped)} isPlaying={isRecording} onFileUpload={handleFileUpload} vehicleCategory={vehicleCategory} onCategoryChange={handleCategoryChange} />
+            {/* PERBAIKAN: Menambahkan customImage dan onRemoveCustomImage ke komponen VehicleSettings */}
+            <VehicleSettings 
+                vehicleType={vehicleType} 
+                onVehicleChange={handleVehicleChange} 
+                customLabel={customLabel} 
+                onLabelChange={handleLabelChange} 
+                modelSize={modelSize} 
+                onSizeChange={handleSizeChange} 
+                rotationUI={rotationUI} 
+                onRotationChange={handleRotationChange} 
+                isFlipped={isFlipped} 
+                onFlipChange={() => setIsFlipped(!isFlipped)} 
+                isPlaying={isRecording} 
+                onFileUpload={handleFileUpload} 
+                vehicleCategory={vehicleCategory} 
+                onCategoryChange={handleCategoryChange} 
+                customImage={customImage} 
+                onRemoveCustomImage={() => setCustomImage(null)} 
+            />
             <VideoSettings duration={videoDuration} onDurationChange={setVideoDuration} resolution={videoResolution} onResolutionChange={setVideoResolution} endImage={endImage} onEndImageChange={handleEndImageUpload} onRemoveEndImage={() => setEndImage(null)} isPlaying={isRecording} />
 
             <div className="relative z-30 mt-2">

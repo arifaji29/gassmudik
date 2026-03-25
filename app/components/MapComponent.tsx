@@ -5,17 +5,12 @@ import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import * as turf from '@turf/turf';
 
-// Menambahkan ikon Rocket untuk tombol Gass!
 import { Bike, Image as ImageIcon, ZoomIn, ZoomOut, Scissors, Plus, X, Video, ArrowLeftRight, ArrowRight, RotateCcw, Rocket } from 'lucide-react';
 
 import CityInput from './CityInput'; 
 import VehicleSettings, { VEHICLE_OPTIONS } from './VehicleSettings';
 import VideoSettings from './VideoSettings';
 import { getProcessedImageData, getCoordinates } from '../utils/mapUtils';
-
-function easeInOutSine(x: number): number {
-  return -(Math.cos(Math.PI * x) - 1) / 2;
-}
 
 export default function MapComponent() {
   const mapContainer = useRef<HTMLDivElement>(null);
@@ -383,8 +378,6 @@ export default function MapComponent() {
     const map = mapRef.current;
     
     setIsLoading(true); setIsFinished(false); setIsRecording(shouldRecord);
-    
-    // --- PERBAIKAN: Menutup form setiap kali Gass atau Rekam ditekan ---
     setIsFormExpanded(false); 
 
     if (distanceRef.current) distanceRef.current.innerText = "0.0 KM"; 
@@ -579,16 +572,87 @@ export default function MapComponent() {
                 exportCtx!.fillStyle = '#1f2937'; exportCtx!.fillText(text, x + 16 * dpr, y + 4 * dpr);
              });
 
+             // --- PERBAIKAN: TEXT BUBBLE MULTI-LINE (WORD WRAPPING) ---
              if (customLabelRef.current.trim() !== '') {
                 const vehPos = map.project(currentPoint.geometry.coordinates as [number, number]);
-                const vx = vehPos.x * dpr; const vy = (vehPos.y - 35) * dpr;
+                const vx = vehPos.x * dpr;
+                const vy = (vehPos.y - 35) * dpr;
                 const text = customLabelRef.current;
-                exportCtx.font = `900 ${12 * dpr}px sans-serif`;
-                const tw = exportCtx.measureText(text).width;
                 
-                exportCtx.fillStyle = 'white'; exportCtx.fillRect(vx - tw/2 - 10*dpr, vy - 14*dpr, tw + 20*dpr, 20*dpr);
-                exportCtx.lineWidth = 1.5 * dpr; exportCtx.strokeStyle = '#e5e7eb'; exportCtx.strokeRect(vx - tw/2 - 10*dpr, vy - 14*dpr, tw + 20*dpr, 20*dpr);
-                exportCtx.fillStyle = '#1f2937'; exportCtx.textAlign = 'center'; exportCtx.fillText(text, vx, vy + 4*dpr); exportCtx.textAlign = 'left';
+                const fontSize = 12 * dpr;
+                exportCtx.font = `900 ${fontSize}px sans-serif`;
+                
+                // Logika Pemecah Baris (Word Wrap)
+                const maxWidth = 150 * dpr;
+                const words = text.split(' ');
+                const lines: string[] = [];
+                let currentLine = words[0];
+                
+                for (let i = 1; i < words.length; i++) {
+                    const word = words[i];
+                    const width = exportCtx.measureText(currentLine + " " + word).width;
+                    if (width < maxWidth) {
+                        currentLine += " " + word;
+                    } else {
+                        lines.push(currentLine);
+                        currentLine = word;
+                    }
+                }
+                lines.push(currentLine);
+
+                // Hitung Dimensi Box Bubble
+                const lineHeight = fontSize * 1.2;
+                let maxLineWidth = 0;
+                lines.forEach(line => {
+                    const w = exportCtx.measureText(line).width;
+                    if (w > maxLineWidth) maxLineWidth = w;
+                });
+
+                const padX = 10 * dpr;
+                const padY = 6 * dpr;
+                const boxWidth = maxLineWidth + padX * 2;
+                const boxHeight = lines.length * lineHeight + padY * 2;
+
+                const boxX = vx - boxWidth / 2;
+                const boxY = vy - boxHeight - (6 * dpr); 
+
+                // Gambar Background Bubble
+                exportCtx.fillStyle = 'white';
+                if (typeof (exportCtx as any).roundRect === 'function') {
+                    exportCtx.beginPath();
+                    (exportCtx as any).roundRect(boxX, boxY, boxWidth, boxHeight, 8 * dpr);
+                    exportCtx.fill();
+                    exportCtx.lineWidth = 1.5 * dpr;
+                    exportCtx.strokeStyle = '#e5e7eb';
+                    exportCtx.stroke();
+                } else {
+                    exportCtx.fillRect(boxX, boxY, boxWidth, boxHeight);
+                    exportCtx.lineWidth = 1.5 * dpr;
+                    exportCtx.strokeStyle = '#e5e7eb';
+                    exportCtx.strokeRect(boxX, boxY, boxWidth, boxHeight);
+                }
+
+                // Gambar Ekor Bubble (Segitiga Bawah)
+                exportCtx.beginPath();
+                exportCtx.moveTo(vx - 6 * dpr, boxY + boxHeight - 1.5 * dpr); 
+                exportCtx.lineTo(vx + 6 * dpr, boxY + boxHeight - 1.5 * dpr);
+                exportCtx.lineTo(vx, boxY + boxHeight + 6 * dpr);
+                exportCtx.fillStyle = 'white';
+                exportCtx.fill();
+
+                // Cetak Teks (Bisa Multi-baris)
+                exportCtx.fillStyle = '#1f2937';
+                exportCtx.textAlign = 'center';
+                exportCtx.textBaseline = 'top';
+
+                const textStartY = boxY + padY + (fontSize * 0.1); 
+                lines.forEach((line, index) => {
+                    exportCtx.fillText(line, vx, textStartY + index * lineHeight);
+                });
+
+                // Reset ke default agar elemen lain (Jarak) tidak berantakan
+                exportCtx.textAlign = 'left';
+                exportCtx.textBaseline = 'alphabetic';
              }
 
              const distText = `${currentDistance.toFixed(1)} KM`;
@@ -766,9 +830,8 @@ export default function MapComponent() {
         <div className="flex flex-col items-center pt-3 pb-3 px-5 cursor-pointer md:cursor-default" onClick={() => setIsFormExpanded(!isFormExpanded)}>
           <div className="w-12 h-1.5 bg-gray-300 rounded-full mb-3 md:hidden"></div>
           <div className="w-full flex justify-between items-center">
-            <h1 className="text-lg font-bold text-gray-800 flex items-center gap-2">GassMudik <Bike className="w-5 h-5 text-blue-600" /></h1>
+            <h1 className="text-lg font-semibold text-gray-800 flex items-center gap-2">GassMudik <Bike className="w-5 h-5 text-blue-600" /></h1>
             
-            {/* --- PERBAIKAN: HEADER TOMBOL --- */}
             <div className="flex items-center gap-1.5">
               {!isPlaying && !isRecording && (
                   <>
@@ -776,7 +839,7 @@ export default function MapComponent() {
                       type="button" 
                       onClick={(e) => { e.stopPropagation(); handleGassMudik(true); }} 
                       disabled={isLoading} 
-                      className={`text-[10px] font-bold text-white bg-red-500 hover:bg-red-600 px-2.5 py-1.5 rounded-lg transition-all flex items-center gap-1 shadow-md shadow-red-500/30 ${isLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
+                      className={`text-[8px] font-bold text-white bg-red-500 hover:bg-red-600 px-2.5 py-1.5 rounded-lg transition-all flex items-center gap-1 shadow-md shadow-red-500/30 ${isLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
                   >
                       <Video className="w-3 h-3" /> {isLoading ? 'Wait..' : 'Rekam'}
                   </button>
@@ -784,13 +847,13 @@ export default function MapComponent() {
                       type="button" 
                       onClick={(e) => { e.stopPropagation(); handleGassMudik(false); }} 
                       disabled={isLoading} 
-                      className={`text-[10px] font-bold text-white bg-blue-600 hover:bg-blue-700 px-2.5 py-1.5 rounded-lg transition-all flex items-center gap-1 shadow-md shadow-blue-500/30 ${isLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
+                      className={`text-[8px] font-bold text-white bg-blue-600 hover:bg-blue-700 px-2.5 py-1.5 rounded-lg transition-all flex items-center gap-1 shadow-md shadow-blue-500/30 ${isLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
                   >
-                      <Rocket className="w-3 h-3" /> {isLoading ? 'Wait..' : 'Previw'}
+                      <Rocket className="w-3 h-3" /> {isLoading ? 'Wait..' : 'Preview'}
                   </button>
                   </>
               )}
-              <button className="md:hidden text-xs font-bold text-blue-600 bg-blue-50 px-3 py-1.5 rounded-full" onClick={() => setIsFormExpanded(!isFormExpanded)}>
+              <button className="md:hidden text-[8px] font-bold text-blue-600 bg-blue-50 px-3 py-1.5 rounded-full" onClick={() => setIsFormExpanded(!isFormExpanded)}>
                 {isFormExpanded ? 'Tutup' : 'Buka'}
               </button>
             </div>
@@ -825,7 +888,6 @@ export default function MapComponent() {
               <CityInput value={tujuan} onChange={(val: string) => setTujuan(val)} disabled={isRecording} placeholder="Ketik tujuan..." inputClassName="w-full mt-1 px-4 py-2.5 bg-gray-100 text-gray-800 text-sm rounded-xl outline-none focus:ring-2 focus:ring-green-500 transition-all disabled:opacity-50 font-medium" />
             </div>
 
-            {/* --- PERBAIKAN: TOMBOL RESET --- */}
             <button 
                 type="button" 
                 onClick={() => handleReset()} 

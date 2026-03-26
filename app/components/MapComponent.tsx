@@ -876,7 +876,7 @@ export default function MapComponent() {
                       disabled={isLoading} 
                       className={`text-[8px] font-bold text-white bg-blue-600 hover:bg-blue-700 px-2.5 py-1.5 rounded-lg transition-all flex items-center gap-1 shadow-md shadow-blue-500/30 ${isLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
                   >
-                      <Rocket className="w-3 h-3" /> {isLoading ? 'Wait..' : 'Preview!'}
+                      <Rocket className="w-3 h-3" /> {isLoading ? 'Wait..' : 'Preview'}
                   </button>
                   </>
               )}

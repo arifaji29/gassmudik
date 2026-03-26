@@ -12,7 +12,7 @@ import VehicleSettings, { VEHICLE_OPTIONS } from './VehicleSettings';
 import VideoSettings from './VideoSettings';
 import { getProcessedImageData, getCoordinates } from '../utils/mapUtils';
 
-// @ts-ignore (Mengabaikan error typescript untuk library ini jika belum ada type definisinya)
+// @ts-ignore
 import fixWebmDuration from 'fix-webm-duration';
 
 function easeInOutSine(x: number): number {
@@ -498,9 +498,10 @@ export default function MapComponent() {
       let exportCanvas: HTMLCanvasElement | null = null;
       const dpr = window.devicePixelRatio || 1;
       
-      // DURASI TAMBAHAN (End Screen)
+      // --- PERBAIKAN: DURASI TOTAL + 2 DETIK ---
       const endScreenDuration = loadedEndImage ? 4000 : 3000;
-      const totalDurationMs = shouldRecord ? (videoDuration * 1000) + endScreenDuration : (videoDuration * 1000);
+      const recordBuffer = 2000; // Extra 2 detik agar tidak terpotong jika frame drop
+      const totalDurationMs = shouldRecord ? (videoDuration * 1000) + endScreenDuration + recordBuffer : (videoDuration * 1000);
 
       if (shouldRecord) {
         try {
@@ -512,16 +513,19 @@ export default function MapComponent() {
           const stream = exportCanvas.captureStream(30); 
           recordedChunksRef.current = [];
           
-          let mimeType = 'video/webm; codecs=vp9'; let extension = 'webm';
-          if (MediaRecorder.isTypeSupported('video/mp4')) { mimeType = 'video/mp4'; extension = 'mp4'; } 
-          else if (!MediaRecorder.isTypeSupported('video/webm; codecs=vp9') && MediaRecorder.isTypeSupported('video/webm')) { mimeType = 'video/webm'; }
+          // --- PERBAIKAN FORMAT: MURNI WEBM UNTUK MENJAHIT METADATA ---
+          let mimeType = 'video/webm; codecs=vp9'; 
+          let extension = 'webm';
+          
+          if (!MediaRecorder.isTypeSupported(mimeType)) { 
+              mimeType = 'video/webm'; 
+          }
 
           mediaRecorderRef.current = new MediaRecorder(stream, { mimeType });
           mediaRecorderRef.current.ondataavailable = (event) => { if (event.data && event.data.size > 0) recordedChunksRef.current.push(event.data); };
           
-          // --- LOGIKA INJEKSI METADATA DURASI UNTUK WEBM ---
           mediaRecorderRef.current.onstop = () => {
-            let blob = new Blob(recordedChunksRef.current, { type: mimeType });
+            const blob = new Blob(recordedChunksRef.current, { type: mimeType });
             
             const downloadFile = (finalBlob: Blob) => {
               const url = URL.createObjectURL(finalBlob); 
@@ -532,15 +536,10 @@ export default function MapComponent() {
               setIsRecording(false);
             };
 
-            // Jika hasil recording adalah WebM, kita injeksi metadata duration menggunakan fixWebmDuration
-            if (mimeType.includes('webm')) {
-              fixWebmDuration(blob, totalDurationMs, (fixedBlob: Blob) => {
-                downloadFile(fixedBlob || blob);
-              });
-            } else {
-              // Jika formatnya sudah MP4, langsung download
-              downloadFile(blob);
-            }
+            // Jahit metadata durasi dengan fix-webm-duration
+            fixWebmDuration(blob, totalDurationMs, (fixedBlob: Blob) => {
+               downloadFile(fixedBlob || blob);
+            });
           };
         } catch (err) { console.error(err); alert("Browser ini tidak mendukung fitur rekam video otomatis."); setIsRecording(false); shouldRecord = false; }
       }
@@ -877,7 +876,7 @@ export default function MapComponent() {
                       disabled={isLoading} 
                       className={`text-[8px] font-bold text-white bg-blue-600 hover:bg-blue-700 px-2.5 py-1.5 rounded-lg transition-all flex items-center gap-1 shadow-md shadow-blue-500/30 ${isLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
                   >
-                      <Rocket className="w-3 h-3" /> {isLoading ? 'Wait..' : 'Preview'}
+                      <Rocket className="w-3 h-3" /> {isLoading ? 'Wait..' : 'Preview!'}
                   </button>
                   </>
               )}

@@ -1,12 +1,14 @@
 "use client";
 import React from 'react';
-import { X } from 'lucide-react';
+import { X, Map as MapIcon, MonitorPlay } from 'lucide-react';
 
 interface VideoSettingsProps {
   duration: number;
   onDurationChange: (val: number) => void;
   resolution: string;
   onResolutionChange: (val: string) => void;
+  mapStyle: string;
+  onMapStyleChange: (val: string) => void;
   endImage: string | null;
   onEndImageChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
   onRemoveEndImage: () => void;
@@ -16,33 +18,55 @@ interface VideoSettingsProps {
 export default function VideoSettings({
   duration, onDurationChange,
   resolution, onResolutionChange,
+  mapStyle, onMapStyleChange,
   endImage, onEndImageChange, onRemoveEndImage,
   isPlaying
 }: VideoSettingsProps) {
   return (
-    <div className="bg-blue-50/50 p-4 rounded-2xl border border-blue-100 flex flex-col gap-3 shadow-sm mt-1">
-      <div>
-        <label className="text-[10px] font-bold text-blue-600 uppercase tracking-wider">Format Video Peta</label>
-        <div className="flex gap-2 mt-1.5">
+    <div className="bg-blue-50/50 p-4 rounded-2xl border border-blue-100 flex flex-col gap-4 shadow-sm mt-1">
+      
+      {/* TEMA PETA & FORMAT VIDEO (Bersebelahan) */}
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <label className="flex items-center gap-1 text-[10px] font-bold text-blue-600 uppercase tracking-wider mb-1.5">
+            <MonitorPlay className="w-3 h-3" /> Format
+          </label>
           <select 
             value={resolution} 
             onChange={(e) => onResolutionChange(e.target.value)} 
             disabled={isPlaying} 
-            className="flex-1 px-3 py-2 bg-white border border-gray-200 text-gray-800 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 text-xs font-semibold cursor-pointer"
+            className="w-full px-3 py-2 bg-white border border-gray-200 text-gray-800 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 text-xs font-semibold cursor-pointer"
           >
             <option value="full">Layar Penuh</option>
-            <option value="9:16">TikTok / Reels (9:16)</option>
+            <option value="9:16">TikTok (9:16)</option>
             <option value="16:9">YouTube (16:9)</option>
-            <option value="1:1">Instagram (1:1)</option>
+            <option value="1:1">Square (1:1)</option>
+          </select>
+        </div>
+
+        <div>
+          <label className="flex items-center gap-1 text-[10px] font-bold text-blue-600 uppercase tracking-wider mb-1.5">
+            <MapIcon className="w-3 h-3" /> Tema Peta
+          </label>
+          <select 
+            value={mapStyle} 
+            onChange={(e) => onMapStyleChange(e.target.value)} 
+            disabled={isPlaying} 
+            className="w-full px-3 py-2 bg-white border border-gray-200 text-gray-800 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 text-xs font-semibold cursor-pointer"
+          >
+            <option value="https://basemaps.cartocdn.com/gl/positron-gl-style/style.json">Terang (Positron)</option>
+            <option value="https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json">Gelap (Dark)</option>
+            <option value="https://basemaps.cartocdn.com/gl/voyager-gl-style/style.json">Warna (Voyager)</option>
           </select>
         </div>
       </div>
 
-      <div className="flex gap-4 mt-1">
+      {/* DURASI */}
+      <div className="flex gap-4">
         <div className="flex-1">
           <div className="flex justify-between items-center mb-1.5">
             <label className="text-[10px] font-bold text-gray-500">Durasi Perjalanan</label>
-            <span className="text-[10px] font-bold text-blue-600">{duration} Detik</span>
+            <span className="text-[10px] font-bold text-blue-600 bg-white px-2 py-0.5 rounded border border-blue-100">{duration} Detik</span>
           </div>
           <input 
             type="range" min="15" max="45" step="1" 
@@ -54,7 +78,8 @@ export default function VideoSettings({
         </div>
       </div>
 
-      <div className="mt-1">
+      {/* GAMBAR AKHIR */}
+      <div>
          <label className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Gambar Akhir Video (Opsional)</label>
          {endImage ? (
              <div className="flex items-center gap-2 mt-1.5">

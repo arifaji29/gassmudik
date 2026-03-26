@@ -12,6 +12,9 @@ import VehicleSettings, { VEHICLE_OPTIONS } from './VehicleSettings';
 import VideoSettings from './VideoSettings';
 import { getProcessedImageData, getCoordinates } from '../utils/mapUtils';
 
+// @ts-ignore (Mengabaikan error typescript untuk library ini jika belum ada type definisinya)
+import fixWebmDuration from 'fix-webm-duration';
+
 function easeInOutSine(x: number): number {
   return -(Math.cos(Math.PI * x) - 1) / 2;
 }
@@ -44,6 +47,8 @@ export default function MapComponent() {
   
   const [videoDuration, setVideoDuration] = useState(15); 
   const [videoResolution, setVideoResolution] = useState('full');
+  const [mapStyle, setMapStyle] = useState('https://basemaps.cartocdn.com/gl/positron-gl-style/style.json');
+  const [styleLoadedTrigger, setStyleLoadedTrigger] = useState(0);
   
   const [endImage, setEndImage] = useState<string | null>(null);
 
@@ -73,7 +78,7 @@ export default function MapComponent() {
     if (!mapContainer.current || mapRef.current) return; 
     const map = new maplibregl.Map({
       container: mapContainer.current,
-      style: 'https://basemaps.cartocdn.com/gl/positron-gl-style/style.json',
+      style: mapStyle,
       center: [108.5, -6.8], zoom: 6, pitch: 45, bearing: 0,
       attributionControl: false,
       preserveDrawingBuffer: true 
@@ -85,6 +90,16 @@ export default function MapComponent() {
   useEffect(() => {
     if (mapRef.current) setTimeout(() => mapRef.current?.resize(), 400); 
   }, [videoResolution]);
+
+  const handleMapStyleChange = (newStyle: string) => {
+    setMapStyle(newStyle);
+    if (mapRef.current) {
+      mapRef.current.setStyle(newStyle);
+      mapRef.current.once('styledata', () => {
+        setStyleLoadedTrigger(prev => prev + 1);
+      });
+    }
+  };
 
   useEffect(() => {
     if (!mapRef.current) return;
@@ -114,7 +129,7 @@ export default function MapComponent() {
       } catch (e) {}
     };
     updateIcon();
-  }, [vehicleType, customImage, isFlipped, vehicleCategory]);
+  }, [vehicleType, customImage, isFlipped, vehicleCategory, styleLoadedTrigger]);
 
   useEffect(() => {
     const el = vehicleLabelMarkerRef.current?.getElement();
@@ -128,7 +143,6 @@ export default function MapComponent() {
     }
   }, [customLabel, vehicleCategory, customImage]);
 
-  // --- LIVE PREVIEW MAP ---
   useEffect(() => {
     if (isPlaying || isRecording || isFinished) return;
     if (!mapRef.current) return;
@@ -239,7 +253,7 @@ export default function MapComponent() {
     }, 1200);
 
     return () => clearTimeout(timer);
-  }, [asal, tujuan, titikSinggah, vehicleType, customImage, customLabel, modelSize, rotationUI, isFlipped, vehicleCategory, isPlaying, isRecording, isFinished]);
+  }, [asal, tujuan, titikSinggah, vehicleType, customImage, customLabel, modelSize, rotationUI, isFlipped, vehicleCategory, isPlaying, isRecording, isFinished, styleLoadedTrigger]); 
 
   const handleCategoryChange = (category: string) => {
     setVehicleCategory(category);
@@ -299,7 +313,7 @@ export default function MapComponent() {
     setVehicleCategory('mobil');
     setVehicleType('/mobil1.png');
     setCustomImage(null);
-    setModelSize(0.12);
+    setModelSize(0.07);
     setRotationUI(-90);
     rotationOffsetRef.current = -90;
     setIsFlipped(false);
@@ -483,6 +497,10 @@ export default function MapComponent() {
       let exportCtx: CanvasRenderingContext2D | null = null;
       let exportCanvas: HTMLCanvasElement | null = null;
       const dpr = window.devicePixelRatio || 1;
+      
+      // DURASI TAMBAHAN (End Screen)
+      const endScreenDuration = loadedEndImage ? 4000 : 3000;
+      const totalDurationMs = shouldRecord ? (videoDuration * 1000) + endScreenDuration : (videoDuration * 1000);
 
       if (shouldRecord) {
         try {
@@ -500,13 +518,29 @@ export default function MapComponent() {
 
           mediaRecorderRef.current = new MediaRecorder(stream, { mimeType });
           mediaRecorderRef.current.ondataavailable = (event) => { if (event.data && event.data.size > 0) recordedChunksRef.current.push(event.data); };
+          
+          // --- LOGIKA INJEKSI METADATA DURASI UNTUK WEBM ---
           mediaRecorderRef.current.onstop = () => {
-            const blob = new Blob(recordedChunksRef.current, { type: mimeType });
-            const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.style.display = 'none'; a.href = url;
-            a.download = `GassMudik-${asal}-${tujuan}.${extension}`; 
-            document.body.appendChild(a); a.click();
-            setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 100);
-            setIsRecording(false);
+            let blob = new Blob(recordedChunksRef.current, { type: mimeType });
+            
+            const downloadFile = (finalBlob: Blob) => {
+              const url = URL.createObjectURL(finalBlob); 
+              const a = document.createElement('a'); a.style.display = 'none'; a.href = url;
+              a.download = `GassMudik-${asal}-${tujuan}.${extension}`; 
+              document.body.appendChild(a); a.click();
+              setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 100);
+              setIsRecording(false);
+            };
+
+            // Jika hasil recording adalah WebM, kita injeksi metadata duration menggunakan fixWebmDuration
+            if (mimeType.includes('webm')) {
+              fixWebmDuration(blob, totalDurationMs, (fixedBlob: Blob) => {
+                downloadFile(fixedBlob || blob);
+              });
+            } else {
+              // Jika formatnya sudah MP4, langsung download
+              downloadFile(blob);
+            }
           };
         } catch (err) { console.error(err); alert("Browser ini tidak mendukung fitur rekam video otomatis."); setIsRecording(false); shouldRecord = false; }
       }
@@ -720,9 +754,6 @@ export default function MapComponent() {
              }
         }
 
-        const endScreenDuration = loadedEndImage ? 4000 : 3000;
-        const totalDurationMs = shouldRecord ? (videoDuration * 1000) + endScreenDuration : (videoDuration * 1000);
-
         if (elapsed < totalDurationMs) {
           if (isAnimationDone && !hasTriggeredFinishUI) {
               setIsPlaying(false);
@@ -860,7 +891,6 @@ export default function MapComponent() {
         <div className="overflow-y-auto px-5 pb-8 custom-scrollbar">
           <form className="flex flex-col gap-3" onSubmit={(e) => e.preventDefault()}>
             
-            {/* PERBAIKAN: Menambahkan customImage dan onRemoveCustomImage ke komponen VehicleSettings */}
             <VehicleSettings 
                 vehicleType={vehicleType} 
                 onVehicleChange={handleVehicleChange} 
@@ -879,7 +909,19 @@ export default function MapComponent() {
                 customImage={customImage} 
                 onRemoveCustomImage={() => setCustomImage(null)} 
             />
-            <VideoSettings duration={videoDuration} onDurationChange={setVideoDuration} resolution={videoResolution} onResolutionChange={setVideoResolution} endImage={endImage} onEndImageChange={handleEndImageUpload} onRemoveEndImage={() => setEndImage(null)} isPlaying={isRecording} />
+            
+            <VideoSettings 
+                duration={videoDuration} 
+                onDurationChange={setVideoDuration} 
+                resolution={videoResolution} 
+                onResolutionChange={setVideoResolution} 
+                mapStyle={mapStyle}
+                onMapStyleChange={handleMapStyleChange}
+                endImage={endImage} 
+                onEndImageChange={handleEndImageUpload} 
+                onRemoveEndImage={() => setEndImage(null)} 
+                isPlaying={isRecording} 
+            />
 
             <div className="relative z-30 mt-2">
               <label className="text-[10px] font-bold text-gray-500 uppercase tracking-wider ml-1">Lokasi Asal</label>
